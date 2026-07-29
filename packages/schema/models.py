@@ -356,6 +356,29 @@ class GenerationTarget(BaseModel):
     model: str
 
 
+class LoraRef(BaseModel):
+    """A LoRA a preset depends on. Civitai LoRAs carry individual licences —
+    each must be audited for commercial use before a preset may ship it."""
+
+    name: str
+    weights_uri: str
+    license: str
+    license_audited: bool = False
+
+
+class CameraPresetRead(BaseModel):
+    """One-click camera move (Higgsfield-style preset-first UX, M11)."""
+
+    id: str
+    label: str
+    description: str
+    category: str
+    motion_code: str
+    prompt_template: str
+    stackable: bool = True
+    loras: list[LoraRef] = []
+
+
 class GenerationBase(SQLModel):
     provider: str
     model: str
@@ -422,4 +445,6 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     GenerationTarget,
     GenerationCreate,
     GenerationRead,
+    LoraRef,
+    CameraPresetRead,
 ]

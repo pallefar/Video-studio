@@ -164,3 +164,21 @@ export interface GenerationRead {
   created_at: string;
   updated_at: string;
 }
+
+export interface LoraRef {
+  name: string;
+  weights_uri: string;
+  license: string;
+  license_audited?: boolean;
+}
+
+export interface CameraPresetRead {
+  id: string;
+  label: string;
+  description: string;
+  category: string;
+  motion_code: string;
+  prompt_template: string;
+  stackable?: boolean;
+  loras?: LoraRef[];
+}
