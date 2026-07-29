@@ -26,12 +26,12 @@ see docs/psd.md §5 for full rationale.
 
 ## M2 — Loop preprocessing
 
-- [ ] Ingest base footage, enforce constant frame rate at ingest (reject VFR)
-- [ ] Seam detection via perceptual hash, ping-pong fallback
-- [ ] Latent cache built and persisted per loop
-- [ ] Second render against a cached loop is measurably faster than the first
+- [x] Ingest base footage, enforce constant frame rate at ingest (reject VFR) *(cpu-lane `loop_preprocess_stage` auto-enqueued on loop creation; ffmpeg `vfrdet` — no ffprobe needed; ratio > 0.05 marks the loop rejected with an error, never discovered at assembly)*
+- [x] Seam detection via perceptual hash, ping-pong fallback *(dHash + colour distance in `pipeline_core/seam.py`; a popping boundary re-renders as forward+reverse — seamless by construction — and swaps `source_uri`, doubling `frame_count`)*
+- [ ] Latent cache built and persisted per loop *(the MuseTalk latent build in `worker_gpu/preprocess/loop_cache.py` is the GPU-host task)*
+- [ ] Second render against a cached loop is measurably faster than the first *(needs the real latent cache)*
 
-**Accept:** `python scripts/bench.py --loop <id>` shows cached run ≥ 40% faster
+**Accept:** `python scripts/bench.py --loop <id>` shows cached run ≥ 40% faster *(CPU half proven in `tests/test_loop_preprocess.py` ✅ 2026-07-29; the cache benchmark is the workstation acceptance)*
 
 ## M3 — GPU worker
 

@@ -234,6 +234,63 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
     return uri
 
 
+@timed_stage("loop_preprocess")
+def loop_preprocess_stage(loop_id: str) -> None:
+    """M2 (CPU half): reject VFR at ingest, score the loop seam, and switch
+    to ping-pong playback when the boundary pops. The MuseTalk latent cache
+    is the GPU half (worker_gpu/preprocess), built on the workstation."""
+    import tempfile
+    from pathlib import Path
+
+    from worker_cpu.ffmpeg import loops as lp
+    from schema.models import BaseLoop
+
+    binary = _find_ffmpeg()
+    if binary is None:
+        log.warning("loop_preprocess_waiting_for_ffmpeg", loop_id=loop_id)
+        return
+
+    with open_session() as session:
+        loop = session.get(BaseLoop, uuid.UUID(loop_id))
+        if loop is None:
+            raise ValueError(f"loop {loop_id} not found")
+        if loop.ping_pong:
+            log.info("loop_preprocess_skip_idempotent", loop_id=loop_id)
+            return
+
+        store = ObjectStore()
+        _, key = store.parse_uri(loop.source_uri)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "source.mp4"
+            store.get_file(key, source)
+
+            ratio = lp.vfr_ratio(binary, source)
+            loop.vfr_ratio = ratio
+            if ratio > lp.VFR_MAX_RATIO:
+                # reject at ingest — never discover drift at assembly
+                loop.error = f"VFR source rejected at ingest (ratio {ratio:.3f})"
+                session.add(loop)
+                session.commit()
+                log.warning("loop_rejected_vfr", loop_id=loop_id, ratio=ratio)
+                return
+
+            score = lp.seam_score(binary, source, tmp_path)
+            loop.seam_score = score
+            if score > lp.SEAM_MAX_SCORE:
+                pingpong = lp.make_ping_pong(binary, source, tmp_path / "pingpong.mp4")
+                uri = store.put_file(f"loops/{loop_id}/pingpong.mp4", pingpong)
+                loop.source_uri = uri
+                loop.frame_count = loop.frame_count * 2
+                loop.ping_pong = True
+                log.info("loop_ping_pong_fallback", loop_id=loop_id, seam_score=score)
+
+        loop.error = None
+        session.add(loop)
+        session.commit()
+        log.info("loop_preprocess_done", loop_id=loop_id, vfr_ratio=ratio, seam_score=loop.seam_score)
+
+
 def derived_prefix(asset_id: str) -> str:
     """Derived artifacts live at a conventional prefix — no schema needed."""
     return f"assets/derived/{asset_id}"

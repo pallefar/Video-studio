@@ -61,6 +61,10 @@ export interface BaseLoopRead {
   frame_count: number;
   seam_index?: number | null;
   id: string;
+  vfr_ratio?: number | null;
+  seam_score?: number | null;
+  ping_pong?: boolean;
+  error?: string | null;
   created_at: string;
 }
 

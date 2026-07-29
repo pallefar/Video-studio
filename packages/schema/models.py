@@ -197,6 +197,12 @@ class BaseLoop(BaseLoopBase, table=True):
     __tablename__ = "base_loops"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    # Loop preprocessing results (M2): VFR sources are rejected at ingest;
+    # a seam pop switches playback to the ping-pong variant.
+    vfr_ratio: Optional[float] = None
+    seam_score: Optional[float] = None
+    ping_pong: bool = False
+    error: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -206,6 +212,10 @@ class BaseLoopCreate(BaseLoopBase):
 
 class BaseLoopRead(BaseLoopBase):
     id: uuid.UUID
+    vfr_ratio: Optional[float] = None
+    seam_score: Optional[float] = None
+    ping_pong: bool = False
+    error: Optional[str] = None
     created_at: datetime
 
 
