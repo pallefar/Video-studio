@@ -60,12 +60,12 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 
 ## M5 — Compliance gate
 
-- [ ] Validator rejects any job with `watermark.persistent != true` *(schema-level validator + gate + tests landed with M1; frame-sampling pending)*
-- [ ] Validator rejects any job with `publish.altered_content != true` *(schema-level validator + gate + tests landed with M1)*
-- [ ] Provenance record written before publish is permitted *(publish route enforces this since M1)*
+- [x] Validator rejects any job with `watermark.persistent != true` *(schema-level validator + gate + tests landed with M1)*
+- [x] Validator rejects any job with `publish.altered_content != true` *(schema-level validator + gate + tests landed with M1)*
+- [x] Provenance record written before publish is permitted *(publish route enforces this since M1; the M6 worker re-checks C4 before any upload)*
 - [x] Frame sampling asserts watermark pixels present at 10%, 50%, 90% of duration *(on real assembled output — `tests/test_assemble.py::test_c1_watermark_frame_sampling`; M16 studio renders had it already)*
 
-**Accept:** `pytest tests/test_compliance.py` passes, including the negative cases
+**Accept:** `pytest tests/test_compliance.py` passes, including the negative cases ✅ (2026-07-29)
 
 ## M6 — Publish
 
@@ -97,13 +97,13 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 
 ## M9 — Generative B-roll lane
 
-- [ ] Wan 2.2 quantised (GGUF/INT8) loads and generates a 5 s clip
-- [ ] Runs as a separate queue with an exclusive GPU lock — never concurrent with the render lane *(the lock itself landed early in `pipeline_core/locks.py`, proven by `tests/test_gpu_exclusivity.py` against real Redis)*
-- [ ] Generation requests enqueue and never block a render job
-- [ ] Output lands in the library as `origin='generated'`, `approved=false`
-- [ ] Approval gate in the control panel before an asset becomes selectable
+- [ ] Wan 2.2 quantised (GGUF/INT8) loads and generates a 5 s clip *(the executor is the M10 workstation task)*
+- [x] Runs as a separate queue with an exclusive GPU lock — never concurrent with the render lane *(the lock landed early in `pipeline_core/locks.py`, proven by `tests/test_gpu_exclusivity.py` against real Redis; wan-lane jobs consume it via `generation_stage_local`)*
+- [x] Generation requests enqueue and never block a render job *(separate `wan` queue — enqueueing never touches the render queue; lock contention re-raises as transient)*
+- [x] Output lands in the library as `origin='generated'`, `approved=false` *(`run_generation`, proven in `tests/test_providers.py`)*
+- [x] Approval gate in the control panel before an asset becomes selectable *(library approve/flag toggle; the resolver never returns an unapproved asset — `tests/test_asset_resolver.py`)*
 
-**Accept:** `pytest tests/test_gpu_exclusivity.py` proves render and generation lanes cannot hold the GPU simultaneously; an unapproved generated asset is never selected by the resolver
+**Accept:** `pytest tests/test_gpu_exclusivity.py` proves render and generation lanes cannot hold the GPU simultaneously; an unapproved generated asset is never selected by the resolver ✅ (2026-07-29; the real Wan 2.2 load is the workstation task)
 
 ---
 
