@@ -14,9 +14,11 @@ from schema.models import (
     AssetCreate,
     AssetOrigin,
     AssetRead,
+    CameraPresetRead,
     GenerationCreate,
     GenerationRead,
     GenerationTarget,
+    LoraRef,
     BaseLoopCreate,
     BaseLoopRead,
     PublishConfig,
@@ -108,6 +110,20 @@ SAMPLES = {
         "status": "queued",
         "created_at": utcnow(),
         "updated_at": utcnow(),
+    },
+    LoraRef: {
+        "name": "orbit-lora",
+        "weights_uri": "s3://w/orbit.safetensors",
+        "license": "CreativeML OpenRAIL-M",
+        "license_audited": True,
+    },
+    CameraPresetRead: {
+        "id": "orbit_360",
+        "label": "360 Orbit",
+        "description": "Full circle around the subject.",
+        "category": "orbit",
+        "motion_code": "Pan Left",
+        "prompt_template": "camera orbits 360 degrees around {subject}",
     },
 }
 

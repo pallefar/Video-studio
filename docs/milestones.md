@@ -127,12 +127,12 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M11 — Camera presets (the signature)
 
-- [ ] Preset registry as data (JSON): camera moves (crash zoom, dolly, dolly-zoom, orbit, FPV, bullet time…) with prompt templates + LoRA refs, stackable up to 3
-- [ ] Wan2.2-Fun-Control-Camera integration in the local provider; Civitai LoRAs individually licence-audited before inclusion
-- [ ] Preset picker UI: image in → preset → clip in library (preset-first, prompt optional)
+- [x] Preset registry as data (JSON): camera moves (crash zoom, dolly, dolly-zoom, orbit, FPV, bullet time…) with prompt templates + LoRA refs, stackable up to 3 *(16 presets in `pipeline_core/presets.py`; unaudited-LoRA validation structural)*
+- [ ] Wan2.2-Fun-Control-Camera integration in the local provider; Civitai LoRAs individually licence-audited before inclusion *(motion codes + params wired through; executor is the M10 workstation task)*
+- [x] Preset picker UI: preset → subject → generate (preset-first, prompt optional) — Higgsfield-style dark gallery, stack up to 3, engine picker from the provider catalog, live generation feed
 - [ ] Advanced mode: Uni3C custom trajectories; ReCamMaster re-shoot of existing footage
 
-**Accept:** golden-path test: preset request → generation record → asset with `origin='generated'`; a preset referencing an unaudited LoRA fails validation
+**Accept:** golden-path test: preset request → generation record → asset with `origin='generated'`; a preset referencing an unaudited LoRA fails validation ✅ (2026-07-29, `tests/test_presets.py`)
 
 ## M12 — Image studio ("Soul" equivalent)
 
