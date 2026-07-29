@@ -20,6 +20,8 @@ EXPECTED_TABLES = {
     "publish_records",
     "assets",
     "generations",
+    "storyboards",
+    "shots",
 }
 
 

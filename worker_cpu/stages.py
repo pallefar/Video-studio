@@ -37,6 +37,19 @@ def assemble_stage(job_id: str) -> None:
         advance_job(session, job, JobStatus.review)
 
 
+def export_stage(storyboard_id: str, timeline: dict) -> None:
+    """Full-length export: timeline document -> ffmpeg filtergraph render.
+    The compiler is M16; until it lands the export waits here, exactly like
+    assemble. The timeline already carries format (long 16:9 / short 9:16),
+    style, and the ordered shot asset uris."""
+    log.info(
+        "export_pending_m16",
+        storyboard_id=storyboard_id,
+        format=timeline.get("format"),
+        shots=len(timeline.get("shots", [])),
+    )
+
+
 def generation_stage_api(generation_id: str) -> None:
     """API-provider generation: a network job. Deliberately no GPU lock —
     hosted models don't touch our card (asserted in tests/test_providers.py)."""

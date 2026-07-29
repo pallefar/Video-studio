@@ -190,3 +190,17 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 - [ ] Qwen3.5-4B (CPU) prompt enhancement for Wan prompts; Florence-2 auto-captioning of assets (feeds the M8 resolver)
 
 **Accept:** music generation lands as licensed-clean library asset; a prompt-enhanced generation records both raw and enhanced prompts
+
+## M19 — Storyboards, style templates & formats
+
+Owner requirement (2026-07-29): per-video storyboard planning, style templates,
+full-length + Shorts formats, export path. Full design: docs/roadmap-v2.md §4.
+
+- [x] `Storyboard` + `Shot` entities (alembic 0003): ordered shots with subject, preset stack, duration target; format `long` (16:9) / `short` (9:16, ≤60 s)
+- [x] Style template registry as data (`pipeline_core/styles.py`, 8 curated looks); style suffix applied to every shot generation, grade params reserved for M16
+- [x] Per-shot generation through the provider layer — format resolution/aspect/duration cap flow into generation params; succeeded generations link their asset to the shot
+- [x] Export compiles the storyboard into an ordered timeline document (409 on unfinished shots; shorts capped at 60 s total) and enqueues the cpu-lane export job
+- [ ] Full-length render of the exported timeline — lands with the M16 ffmpeg compiler (`export_stage` waits until then, like assemble)
+- [x] Storyboards tab in the panel: board list + create (title/format/style), shot rows with status chips, per-shot generate/regenerate, export button gated on readiness
+
+**Accept:** `pytest tests/test_storyboards.py` — style+format flow into generation params, shorts duration cap enforced at generation and export, export refuses unfinished boards, ordered timeline compiled ✅ (2026-07-29)
