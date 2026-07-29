@@ -52,6 +52,7 @@ class GenerationKind(str, Enum):
     video_to_video = "video_to_video"  # VFX restyle lane (M13)
     image = "image"
     upscale = "upscale"
+    music = "music"  # ACE-Step music beds (M18)
 
 
 class GenerationStatus(str, Enum):
@@ -574,6 +575,9 @@ class GenerationCreate(GenerationBase):
     fallback: list[GenerationTarget] = []
     project_id: Optional[uuid.UUID] = None
     identity_id: Optional[uuid.UUID] = None
+    # M18: enhance the prompt before generation; both prompts are recorded
+    # (raw in params.prompt_raw, enhanced as the generation prompt).
+    enhance: bool = False
 
 
 class GenerationRead(GenerationBase):

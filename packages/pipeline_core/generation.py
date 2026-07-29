@@ -20,10 +20,11 @@ from pipeline_core.dispatch import Dispatcher
 from pipeline_core.embeddings import get_embedder
 from pipeline_core.providers import (
     CLASS_LOCAL,
+    LANE_SHARED,
     ProviderRegistry,
     build_registry,
 )
-from pipeline_core.queues import QUEUE_CPU, QUEUE_WAN
+from pipeline_core.queues import QUEUE_CPU, QUEUE_GPU, QUEUE_WAN
 from pipeline_core.stock import download
 from pipeline_core.storage import ObjectStore
 from schema.models import (
@@ -37,9 +38,18 @@ from schema.models import (
 
 log = structlog.get_logger()
 
-_EXTENSIONS = {"video/mp4": "mp4", "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+_EXTENSIONS = {
+    "video/mp4": "mp4",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/webp": "webp",
+    "audio/mpeg": "mp3",
+    "audio/wav": "wav",
+    "audio/flac": "flac",
+}
 
 STAGE_LOCAL = "worker_gpu.stages.generation_stage_local"
+STAGE_SHARED = "worker_gpu.stages.generation_stage_shared"
 STAGE_API = "worker_cpu.stages.generation_stage_api"
 
 
@@ -49,7 +59,12 @@ def enqueue_generation(
     registry = registry or build_registry()
     _, spec = registry.resolve(generation.provider, generation.model, generation.kind)
     if spec.provider_class == CLASS_LOCAL:
-        queue, stage = QUEUE_WAN, STAGE_LOCAL
+        # lane routing (roadmap-v2 §5): shared residents ride the render
+        # queue; the 14B-class models take the exclusive wan lane.
+        if getattr(spec, "lane", None) == LANE_SHARED:
+            queue, stage = QUEUE_GPU, STAGE_SHARED
+        else:
+            queue, stage = QUEUE_WAN, STAGE_LOCAL
     else:
         queue, stage = QUEUE_CPU, STAGE_API
     dispatcher.enqueue(
@@ -120,6 +135,9 @@ def run_generation(
             uri=uri,
             caption=generation.prompt,
             has_identifiable_people=False,
+            # licence provenance rides in on the request (e.g. M18 music beds
+            # record the generating model's clean licence)
+            license=(generation.params or {}).get("asset_license"),
             approved=False,  # human approval gate before the resolver may pick it
             embedding=get_embedder().embed(generation.prompt),
         )

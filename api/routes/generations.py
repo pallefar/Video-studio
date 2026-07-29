@@ -62,7 +62,13 @@ async def create_generation(
     except UnknownModelError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    prompt = body.prompt
     params = body.params
+    if body.enhance:
+        from pipeline_core.enhance import apply_enhancement
+
+        prompt, params = apply_enhancement(prompt, params)
+
     if body.identity_id is not None:
         identity = session.get(Identity, body.identity_id)
         if identity is None:
@@ -78,7 +84,7 @@ async def create_generation(
         provider=body.provider,
         model=body.model,
         kind=body.kind,
-        prompt=body.prompt,
+        prompt=prompt,
         params=params,
         fallback=[target.model_dump() for target in body.fallback],
         project_id=body.project_id,

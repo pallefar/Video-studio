@@ -27,6 +27,13 @@ CLASS_LOCAL = "local"
 CLASS_API = "api"
 
 
+# GPU lanes for local models (roadmap-v2 §5): "wan" is the exclusive-lock
+# lane for the 14B-class models; "shared" rides the render lane alongside the
+# resident Chatterbox/MuseTalk (ACE-Step base, VACE 1.3B previews, ...).
+LANE_WAN = "wan"
+LANE_SHARED = "shared"
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     provider: str
@@ -34,6 +41,7 @@ class ModelSpec:
     kinds: frozenset[GenerationKind]
     provider_class: str
     notes: str = ""
+    lane: str = LANE_WAN
 
 
 @dataclass
@@ -86,9 +94,12 @@ class LocalWanProvider:
             ModelSpec(self.name, "seedvr2-3b", frozenset({GenerationKind.upscale}),
                       CLASS_LOCAL, "hero-shot upscale, M13"),
             ModelSpec(self.name, "real-esrgan", frozenset({GenerationKind.upscale}),
-                      CLASS_LOCAL, "cheap upscale lane, M13"),
+                      CLASS_LOCAL, "cheap upscale lane, M13", lane=LANE_SHARED),
             ModelSpec(self.name, "film", frozenset({GenerationKind.upscale}),
-                      CLASS_LOCAL, "frame interpolation, M13"),
+                      CLASS_LOCAL, "frame interpolation, M13", lane=LANE_SHARED),
+            # Audio suite (M18): ACE-Step base fits the render lane's headroom.
+            ModelSpec(self.name, "ace-step", frozenset({GenerationKind.music}),
+                      CLASS_LOCAL, "music beds, M18 (Apache 2.0)", lane=LANE_SHARED),
         ]
 
     def generate(self, generation: Generation) -> ProviderResult:

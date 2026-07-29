@@ -140,6 +140,17 @@ def generation_stage_local(generation_id: str) -> None:
         run_generation(generation_id)
 
 
+@timed_stage("generation")
+def generation_stage_shared(generation_id: str) -> None:
+    """Shared-lane generation (M18): rides the render queue under the render
+    holder — ACE-Step and the other shared residents never take the wan
+    lane's exclusive lock, and can never run concurrently with it."""
+    from pipeline_core.generation import run_generation
+
+    with gpu_lock(get_redis(), HOLDER_RENDER):
+        run_generation(generation_id)
+
+
 # Cached like the render engines: the trainer loads once per worker process.
 _trainer = None
 

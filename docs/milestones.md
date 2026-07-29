@@ -189,11 +189,11 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 ## M18 — Audio suite & prompt intelligence
 
 - [x] Audio infrastructure (landed ahead of the models): timeline audio tracks (`AudioClip` with gain + per-clip duck flag), shot audio forms the voice bus in exports, music beds mix under it with sidechain ducking, `POST /assets/upload` brings your own music/footage in, and every worker stage records its duration to the metrics table (`GET /metrics`)
-- [ ] ACE-Step music-bed generation into the library (shared lane)
+- [x] ACE-Step music-bed generation into the library (shared lane) *(`POST /music/generate`; ModelSpec lane routing — shared residents ride the render queue under the render holder, never the wan lock; asset lands with its Apache-2.0 licence recorded; the real ACE-Step load is the workstation task like every local model)*
 - [x] Emotion controls on Chatterbox TTS segments (Speak-style) *(data-driven preset registry in `pipeline_core/emotions.py` mapping to exaggeration/cfg_weight; `Segment.emotion` pinned next to the seed; per-segment re-render endpoint carries emotion/reseed; tts stage passes delivery params to the engine — audible once M3's real Chatterbox lands)*
-- [ ] Qwen3.5-4B (CPU) prompt enhancement for Wan prompts; Florence-2 auto-captioning of assets (feeds the M8 resolver)
+- [ ] Qwen3.5-4B (CPU) prompt enhancement for Wan prompts; Florence-2 auto-captioning of assets (feeds the M8 resolver) *(enhancement plumbing landed: `enhance=true` records raw+enhanced via `pipeline_core/enhance.py` — Qwen GGUF via the `[enhance]` extra + `QWEN_MODEL_PATH`, deterministic heuristic until then; Florence-2 captioning still open)*
 
-**Accept:** music generation lands as licensed-clean library asset; a prompt-enhanced generation records both raw and enhanced prompts
+**Accept:** music generation lands as licensed-clean library asset; a prompt-enhanced generation records both raw and enhanced prompts ✅ (2026-07-29, `tests/test_music_and_enhance.py`)
 
 ## M19 — Storyboards, style templates & formats
 

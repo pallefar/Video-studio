@@ -38,6 +38,10 @@ publish = [
     "google-auth>=2.20",
     "google-auth-oauthlib>=1.0",
 ]
+# Prompt enhancement (M18): Qwen3.5-4B GGUF on CPU via llama.cpp.
+enhance = [
+    "llama-cpp-python>=0.2.80",
+]
 # Real sentence embeddings for the asset resolver (CPU); without it the
 # deterministic hashing embedder is used.
 embed = [

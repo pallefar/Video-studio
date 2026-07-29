@@ -35,3 +35,7 @@ class Settings(BaseSettings):
     youtube_client_secret: str = ""
     youtube_refresh_token: str = ""
     youtube_token_uri: str = "https://oauth2.googleapis.com/token"
+
+    # Prompt enhancement (M18): path to the Qwen3.5-4B GGUF; empty -> the
+    # deterministic heuristic enhancer is used.
+    qwen_model_path: str = ""

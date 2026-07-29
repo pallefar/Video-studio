@@ -12,6 +12,7 @@ from api.routes import (
     jobs,
     loops,
     metrics,
+    music,
     presets,
     projects,
     publish,
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(storyboards.router)
     app.include_router(timelines.router)
     app.include_router(metrics.router)
+    app.include_router(music.router)
     app.include_router(publish.router)
 
     @app.get("/healthz")
