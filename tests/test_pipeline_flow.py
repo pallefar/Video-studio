@@ -27,9 +27,11 @@ SEGMENT_DURATION_MS = 40_000  # long enough that four segments need two windows
 class FakeTTS:
     def __init__(self):
         self.calls: list[tuple[str, int, int]] = []
+        self.emotions: list[dict | None] = []
 
-    def synthesize_segment(self, job_id, idx, text, seed):
+    def synthesize_segment(self, job_id, idx, text, seed, emotion=None):
         self.calls.append((job_id, idx, seed))
+        self.emotions.append(emotion)
         return f"s3://test/jobs/{job_id}/tts/{idx}.wav", SEGMENT_DURATION_MS
 
 
@@ -159,7 +161,7 @@ def test_engine_failure_marks_job_failed_and_retry_reenters(pipeline):
     redis, engine, job_id = pipeline["redis"], pipeline["engine"], pipeline["job_id"]
 
     class ExplodingTTS:
-        def synthesize_segment(self, job_id, idx, text, seed):
+        def synthesize_segment(self, job_id, idx, text, seed, emotion=None):
             raise RuntimeError("CUDA OOM")
 
     gpu_stages._engines = (ExplodingTTS(), pipeline["lipsync"])

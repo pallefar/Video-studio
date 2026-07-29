@@ -253,6 +253,9 @@ class SegmentBase(SQLModel):
     audio_uri: Optional[str] = None
     duration_ms: Optional[int] = None
     seed: Optional[int] = None
+    # Speak-style delivery preset (M18); validated against
+    # pipeline_core.emotions at the API edge. None = neutral.
+    emotion: Optional[str] = None
 
 
 class Segment(SegmentBase, table=True):

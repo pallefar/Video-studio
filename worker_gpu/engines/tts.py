@@ -21,11 +21,21 @@ class ChatterboxEngine:
             raise RuntimeError("ChatterboxEngine requires a CUDA device — run scripts/verify_gpu.py first")
         raise NotImplementedError("M3: load Chatterbox weights (pinned version) in BF16")
 
-    def synthesize_segment(self, job_id: str, segment_idx: int, text: str, seed: int) -> tuple[str, int]:
+    def synthesize_segment(
+        self,
+        job_id: str,
+        segment_idx: int,
+        text: str,
+        seed: int,
+        emotion: dict | None = None,
+    ) -> tuple[str, int]:
         """Render one segment to audio, upload via ObjectStore, and return
         (s3 uri, duration in ms).
 
         Idempotent on stage_key(job_id, "tts", segment_idx); the seed is pinned
-        and persisted so a retry reproduces the same take.
+        and persisted so a retry reproduces the same take. `emotion` carries
+        the Speak-style delivery controls from pipeline_core.emotions
+        (exaggeration / cfg_weight, M18) — pinned alongside the seed so a
+        re-render reproduces the delivery too.
         """
         raise NotImplementedError("M3")

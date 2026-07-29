@@ -15,6 +15,7 @@ from sqlmodel import select
 
 from pipeline_core.chunking import chunk_windows
 from pipeline_core.db import advance_job, fail_job, open_session
+from pipeline_core.emotions import emotion_params
 from pipeline_core.metrics import timed_stage
 from pipeline_core.dispatch import Dispatcher, get_redis
 from pipeline_core.locks import HOLDER_RENDER, GpuLockHeld, gpu_lock
@@ -75,7 +76,8 @@ def tts_stage(job_id: str) -> None:
             with gpu_lock(get_redis(), HOLDER_RENDER):
                 for segment in pending:
                     audio_uri, duration_ms = tts_engine.synthesize_segment(
-                        job_id, segment.idx, segment.text, segment.seed
+                        job_id, segment.idx, segment.text, segment.seed,
+                        emotion=emotion_params(segment.emotion),
                     )
                     segment.audio_uri = audio_uri
                     segment.duration_ms = duration_ms

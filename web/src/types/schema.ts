@@ -71,6 +71,7 @@ export interface SegmentRead {
   audio_uri?: string | null;
   duration_ms?: number | null;
   seed?: number | null;
+  emotion?: string | null;
   id: string;
   job_id: string;
 }

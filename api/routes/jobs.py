@@ -8,8 +8,9 @@ from sqlmodel import Session, select
 
 from api.db import get_session
 from pipeline_core.dispatch import Dispatcher
+from pipeline_core.emotions import EmotionError, emotion_params
 from pipeline_core.queues import QUEUE_GPU, stage_key
-from pipeline_core.segmenting import make_segments
+from pipeline_core.segmenting import SEED_MAX, make_segments
 from schema.models import (
     VALID_TRANSITIONS,
     BaseLoop,
@@ -124,4 +125,56 @@ async def transition_job(
     if body.status == JobStatus.queued:
         # retry (failed -> queued) and re-render (review -> queued) re-enter the lane
         _enqueue_render(dispatcher, job.id)
+    return _read_model(session, job)
+
+
+class SegmentRerenderRequest(BaseModel):
+    """Re-render one segment (the retry unit). The pinned seed is kept unless
+    reseed asks for a fresh take; emotion (M18) changes delivery only when
+    provided — an explicit null resets to neutral."""
+
+    emotion: str | None = None
+    reseed: bool = False
+
+
+@router.post("/{job_id}/segments/{idx}/rerender", response_model=RenderJobRead)
+async def rerender_segment(
+    job_id: uuid.UUID,
+    idx: int,
+    body: SegmentRerenderRequest,
+    session: Session = Depends(get_session),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+):
+    import secrets
+
+    job = _get_or_404(session, job_id)
+    if job.status != JobStatus.review:
+        raise HTTPException(
+            status_code=409, detail="per-segment re-render requires the job to be in review"
+        )
+    segment = session.exec(
+        select(Segment).where(Segment.job_id == job_id, Segment.idx == idx)
+    ).first()
+    if segment is None:
+        raise HTTPException(status_code=404, detail=f"segment {idx} not found")
+
+    if "emotion" in body.model_fields_set:
+        try:
+            emotion_params(body.emotion)  # validate against the registry
+        except EmotionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        segment.emotion = body.emotion
+    if body.reseed:
+        segment.seed = secrets.randbelow(SEED_MAX)
+
+    # clearing the audio makes tts_stage re-render exactly this segment
+    segment.audio_uri = None
+    segment.duration_ms = None
+    session.add(segment)
+
+    job.status = JobStatus.queued
+    job.updated_at = utcnow()
+    session.add(job)
+    session.commit()
+    _enqueue_render(dispatcher, job.id)
     return _read_model(session, job)

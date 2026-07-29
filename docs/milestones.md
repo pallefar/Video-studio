@@ -80,7 +80,7 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 
 - [ ] Submit script, pick loop + voice profile
 - [ ] Job list with live status (TanStack Query polling, 2 s interval)
-- [ ] Preview before publish, per-segment re-render button
+- [ ] Preview before publish, per-segment re-render button *(backend landed with M18's emotions: `POST /jobs/{id}/segments/{idx}/rerender` with emotion/reseed)*
 - [ ] Manual publish confirmation — never automatic
 
 **Accept:** a full video produced without touching the terminal
@@ -190,7 +190,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 - [x] Audio infrastructure (landed ahead of the models): timeline audio tracks (`AudioClip` with gain + per-clip duck flag), shot audio forms the voice bus in exports, music beds mix under it with sidechain ducking, `POST /assets/upload` brings your own music/footage in, and every worker stage records its duration to the metrics table (`GET /metrics`)
 - [ ] ACE-Step music-bed generation into the library (shared lane)
-- [ ] Emotion controls on Chatterbox TTS segments (Speak-style)
+- [x] Emotion controls on Chatterbox TTS segments (Speak-style) *(data-driven preset registry in `pipeline_core/emotions.py` mapping to exaggeration/cfg_weight; `Segment.emotion` pinned next to the seed; per-segment re-render endpoint carries emotion/reseed; tts stage passes delivery params to the engine — audible once M3's real Chatterbox lands)*
 - [ ] Qwen3.5-4B (CPU) prompt enhancement for Wan prompts; Florence-2 auto-captioning of assets (feeds the M8 resolver)
 
 **Accept:** music generation lands as licensed-clean library asset; a prompt-enhanced generation records both raw and enhanced prompts
