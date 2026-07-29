@@ -137,7 +137,8 @@ async def timeline_media(
     store: ObjectStore = Depends(get_object_store),
 ):
     """Presigned playback URLs per asset so the editor previews without any
-    further server round-trips."""
+    further server round-trips. Prefers the 720p ingest proxy (M14) when one
+    exists — cheaper decode, always browser-safe."""
     timeline = _get_or_404(session, timeline_id)
     urls: dict[str, str] = {}
     for track in timeline.doc.video_tracks:
@@ -146,6 +147,10 @@ async def timeline_media(
                 continue
             asset = session.get(Asset, uuid.UUID(clip.asset_id))
             if asset is None:
+                continue
+            proxy_key = f"assets/derived/{clip.asset_id}/proxy.mp4"
+            if store.exists(proxy_key):
+                urls[clip.asset_id] = store.presign_get(proxy_key)
                 continue
             bucket, key = ObjectStore.parse_uri(asset.uri)
             if bucket == store.bucket:

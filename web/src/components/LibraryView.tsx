@@ -59,6 +59,13 @@ export default function LibraryView() {
                 <td className="px-4 py-3">{asset.approved ? "✓" : "—"}</td>
                 <td className="px-4 py-3">
                   <button
+                    onClick={() => fetch(`/assets/${asset.id}/ingest`, { method: "POST" }).then(refresh)}
+                    className="mr-2 rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+                    title="Produce editor derivatives: 720p proxy, scrub thumbnails, waveform"
+                  >
+                    Ingest
+                  </button>
+                  <button
                     onClick={() => act(asset.id!, "approve")}
                     className="mr-2 rounded bg-emerald-900/60 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-800/60"
                   >

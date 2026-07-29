@@ -164,3 +164,38 @@ async def flag_asset(asset_id: uuid.UUID, session: Session = Depends(get_session
     session.commit()
     session.refresh(asset)
     return asset
+
+
+@router.post("/{asset_id}/ingest", status_code=202)
+async def ingest_asset(
+    asset_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    dispatcher=Depends(get_dispatcher),
+):
+    """Queue derivative production (720p proxy, scrub sprites + VTT, waveform
+    peaks) on the cpu lane. Idempotent — existing derivatives are kept."""
+    _get_or_404(session, asset_id)
+    job_key = f"ingest-{asset_id}"
+    dispatcher.enqueue(QUEUE_CPU, "worker_cpu.stages.ingest_stage", str(asset_id), job_key=job_key)
+    return {"queued": job_key}
+
+
+@router.get("/{asset_id}/derived")
+async def derived_media(
+    asset_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+):
+    """Presigned URLs for whichever editor derivatives exist."""
+    _get_or_404(session, asset_id)
+    prefix = f"assets/derived/{asset_id}"
+    urls = {}
+    for name, key in [
+        ("proxy", f"{prefix}/proxy.mp4"),
+        ("sprite", f"{prefix}/sprite.jpg"),
+        ("vtt", f"{prefix}/sprite.vtt"),
+        ("peaks", f"{prefix}/peaks.json"),
+    ]:
+        if store.exists(key):
+            urls[name] = store.presign_get(key)
+    return urls
