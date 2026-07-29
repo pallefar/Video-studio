@@ -169,11 +169,12 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M16 — Server render compiler
 
-- [ ] Timeline JSON → ffmpeg `filter_complex` compiler in the CPU worker: trim/setpts, per-track overlay, xfade transitions, PNG text overlays, amix + sidechaincompress ducking, segment-then-concat for long timelines
+- [x] Timeline JSON → ffmpeg `filter_complex` compiler in the CPU worker: per-shot fps/scale/pad/setpts normalisation, concat or xfade transition chain, PNG watermark overlay (Pillow-rendered — no fontconfig dependency), silent stereo bed, H.264 CRF 18 yuv420p +faststart *(amix/sidechaincompress ducking + music beds land with M18; segment-then-concat optimisation when timelines get long)*
 - [ ] Progress reporting via `-progress` parse into the metrics table
-- [ ] **Compliance hook: timeline containing any `origin='generated'` asset or avatar footage gets the C1 watermark injected into the filtergraph; frame-sampling test extends to studio renders**
+- [x] **Compliance hook: the watermark decision lives INSIDE the compiler with no off-switch — any `origin='generated'` shot forces the C1 overlay (full duration, bottom-right) and compiling generated content without the overlay raises. Frame-sampling test proves watermark pixels at 10/50/90% of real rendered output**
+- [x] `export_stage` renders for real: fetch shots from the store → compile → ffmpeg (system binary or imageio-ffmpeg static) → upload → the export lands as an asset in the library and the project pool
 
-**Accept:** `pytest tests/test_render_compiler.py` — golden filtergraphs for trim/transition/ducking cases; the compliance case proves a generated-asset timeline cannot render without the watermark
+**Accept:** `pytest tests/test_render_compiler.py` — golden filtergraphs (single/concat/xfade/short-format), the compliance cases, real end-to-end renders, and C1 frame sampling ✅ (2026-07-29)
 
 ## M17 — Identity & consent ("Soul ID" equivalent)
 
@@ -200,7 +201,7 @@ full-length + Shorts formats, export path. Full design: docs/roadmap-v2.md §4.
 - [x] Style template registry as data (`pipeline_core/styles.py`, 8 curated looks); style suffix applied to every shot generation, grade params reserved for M16
 - [x] Per-shot generation through the provider layer — format resolution/aspect/duration cap flow into generation params; succeeded generations link their asset to the shot
 - [x] Export compiles the storyboard into an ordered timeline document (409 on unfinished shots; shorts capped at 60 s total) and enqueues the cpu-lane export job
-- [ ] Full-length render of the exported timeline — lands with the M16 ffmpeg compiler (`export_stage` waits until then, like assemble)
+- [x] Full-length render of the exported timeline — landed with the M16 ffmpeg compiler: export now produces a real MP4 back into the library/project pool
 - [x] Storyboards tab in the panel: board list + create (title/format/style), shot rows with status chips, per-shot generate/regenerate, export button gated on readiness
 
 **Accept:** `pytest tests/test_storyboards.py` — style+format flow into generation params, shorts duration cap enforced at generation and export, export refuses unfinished boards, ordered timeline compiled ✅ (2026-07-29)
