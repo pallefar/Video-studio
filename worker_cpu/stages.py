@@ -37,6 +37,14 @@ def assemble_stage(job_id: str) -> None:
         advance_job(session, job, JobStatus.review)
 
 
+def generation_stage_api(generation_id: str) -> None:
+    """API-provider generation: a network job. Deliberately no GPU lock —
+    hosted models don't touch our card (asserted in tests/test_providers.py)."""
+    from pipeline_core.generation import run_generation
+
+    run_generation(generation_id)
+
+
 def stock_ingest_stage(result: dict) -> str:
     """Download one stock search result into the object store and create the
     Asset row. The Asset only exists once its bytes are safely in MinIO.

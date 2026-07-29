@@ -46,6 +46,20 @@ class AssetOrigin(str, Enum):
     own = "own"
 
 
+class GenerationKind(str, Enum):
+    text_to_video = "text_to_video"
+    image_to_video = "image_to_video"
+    image = "image"
+    upscale = "upscale"
+
+
+class GenerationStatus(str, Enum):
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+
+
 # Stage names used for idempotency keys — see pipeline_core.queues.stage_key.
 STAGES: tuple[str, ...] = ("tts", "lipsync", "assemble", "captions", "watermark", "publish")
 
@@ -331,10 +345,65 @@ class AssetRead(AssetBase):
 
 
 # ---------------------------------------------------------------------------
+# Generation — one provider-layer generation request (roadmap-v2 §3, M10)
+# ---------------------------------------------------------------------------
+
+
+class GenerationTarget(BaseModel):
+    """One (provider, model) candidate; a request may carry an ordered chain."""
+
+    provider: str
+    model: str
+
+
+class GenerationBase(SQLModel):
+    provider: str
+    model: str
+    kind: GenerationKind
+    prompt: str
+
+
+class Generation(GenerationBase, table=True):
+    __tablename__ = "generations"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    status: GenerationStatus = Field(
+        default=GenerationStatus.queued,
+        sa_column=Column(sa.Enum(GenerationStatus, native_enum=False, length=16), nullable=False),
+    )
+    params: Optional[dict] = Field(default=None, sa_column=Column(sa.JSON, nullable=True))
+    fallback: Optional[list[dict]] = Field(default=None, sa_column=Column(sa.JSON, nullable=True))
+    external_id: Optional[str] = None
+    cost: Optional[float] = None
+    error: Optional[str] = None
+    asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class GenerationCreate(GenerationBase):
+    params: Optional[dict] = None
+    fallback: list[GenerationTarget] = []
+
+
+class GenerationRead(GenerationBase):
+    id: uuid.UUID
+    status: GenerationStatus
+    params: Optional[dict] = None
+    fallback: Optional[list[dict]] = None
+    external_id: Optional[str] = None
+    cost: Optional[float] = None
+    error: Optional[str] = None
+    asset_id: Optional[uuid.UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
 # Export manifests for the TS generator — order is the file order, keep stable
 # ---------------------------------------------------------------------------
 
-EXPORTED_ENUMS: list[type[Enum]] = [JobStatus, AssetOrigin]
+EXPORTED_ENUMS: list[type[Enum]] = [JobStatus, AssetOrigin, GenerationKind, GenerationStatus]
 
 EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     WatermarkConfig,
@@ -350,4 +419,7 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     PublishRecordRead,
     AssetCreate,
     AssetRead,
+    GenerationTarget,
+    GenerationCreate,
+    GenerationRead,
 ]

@@ -5,6 +5,10 @@ export type JobStatus = "queued" | "tts" | "lipsync" | "assemble" | "review" | "
 
 export type AssetOrigin = "generated" | "stock" | "own";
 
+export type GenerationKind = "text_to_video" | "image_to_video" | "image" | "upscale";
+
+export type GenerationStatus = "queued" | "running" | "succeeded" | "failed";
+
 export interface WatermarkConfig {
   text?: string;
   position?: "bottom_right";
@@ -128,4 +132,35 @@ export interface AssetRead {
   approved?: boolean;
   id: string;
   created_at: string;
+}
+
+export interface GenerationTarget {
+  provider: string;
+  model: string;
+}
+
+export interface GenerationCreate {
+  provider: string;
+  model: string;
+  kind: GenerationKind;
+  prompt: string;
+  params?: Record<string, unknown> | null;
+  fallback?: GenerationTarget[];
+}
+
+export interface GenerationRead {
+  provider: string;
+  model: string;
+  kind: GenerationKind;
+  prompt: string;
+  id: string;
+  status: GenerationStatus;
+  params?: Record<string, unknown> | null;
+  fallback?: Record<string, unknown>[] | null;
+  external_id?: string | null;
+  cost?: number | null;
+  error?: string | null;
+  asset_id?: string | null;
+  created_at: string;
+  updated_at: string;
 }

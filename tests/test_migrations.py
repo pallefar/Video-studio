@@ -19,6 +19,7 @@ EXPECTED_TABLES = {
     "segments",
     "publish_records",
     "assets",
+    "generations",
 }
 
 

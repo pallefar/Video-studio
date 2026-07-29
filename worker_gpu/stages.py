@@ -122,3 +122,13 @@ def lipsync_stage(job_id: str) -> None:
     Dispatcher().enqueue(
         QUEUE_CPU, "worker_cpu.stages.assemble_stage", job_id, job_key=stage_key(job_id, "assemble")
     )
+
+
+def generation_stage_local(generation_id: str) -> None:
+    """Local (wan-lane) generation: exclusive GPU lock, never concurrent with
+    the render lane."""
+    from pipeline_core.generation import run_generation
+    from pipeline_core.locks import HOLDER_WAN
+
+    with gpu_lock(get_redis(), HOLDER_WAN):
+        run_generation(generation_id)
