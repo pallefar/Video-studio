@@ -145,11 +145,11 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M13 — VFX & finishing lane
 
-- [ ] Effect preset registry over Wan2.2-VACE-Fun (v2v restyle, levitation/disintegrate/fire-class effects); VACE 1.3B fast-preview path
-- [ ] Upscale/interpolate finishing: SeedVR2-3B hero shots, Real-ESRGAN + RIFE (or FILM) cheap lane
-- [ ] Effects stack with camera presets (Higgsfield "Mix" mechanic)
+- [x] Effect preset registry over Wan2.2-VACE-Fun (v2v restyle, levitation/disintegrate/fire-class effects); VACE 1.3B fast-preview path *(10 effects in `pipeline_core/effects.py`; `POST /effects/apply` with `preview` routing to the 1.3B model; rendering waits on the M10 executor like every local model)*
+- [x] Upscale/interpolate finishing: SeedVR2-3B hero shots, Real-ESRGAN + FILM cheap lane *(RIFE stays out per the licence register's training-data caveat; `POST /effects/upscale`)*
+- [x] Effects stack with camera presets (Higgsfield "Mix" mechanic) *(`compose_mix` reuses the M11 camera stack rules; motion codes ride along in params)*
 
-**Accept:** effect preset applied to an existing library asset produces a new derived asset with provenance chain
+**Accept:** effect preset applied to an existing library asset produces a new derived asset with provenance chain ✅ (2026-07-29, `tests/test_effects.py`; chain walkable via `GET /assets/{id}/provenance`, Effects/Upscale actions in the library panel)
 
 ## M14 — Studio ingest pipeline
 

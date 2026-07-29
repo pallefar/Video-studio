@@ -17,6 +17,7 @@ from schema.models import (
     AssetRead,
     CameraPresetRead,
     ConsentRecord,
+    EffectPresetRead,
     GenerationCreate,
     GenerationRead,
     GenerationTarget,
@@ -147,6 +148,13 @@ SAMPLES = {
         "label": "Cinematic Noir",
         "description": "High contrast.",
         "prompt_suffix": "cinematic noir look",
+    },
+    EffectPresetRead: {
+        "id": "levitation",
+        "label": "Levitation",
+        "description": "Subject lifts off the ground.",
+        "category": "physics",
+        "prompt_template": "the subject slowly levitates",
     },
     IdentityCreate: {"name": "owner", "reference_asset_ids": [_UUID]},
     IdentityRead: {

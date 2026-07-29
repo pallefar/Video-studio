@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from api.routes import (
     assets,
+    effects,
     emotions,
     generations,
     identities,
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
     app.include_router(loops.router)
     app.include_router(voices.router)
     app.include_router(assets.router)
+    app.include_router(effects.router)
     app.include_router(emotions.router)
     app.include_router(generations.router)
     app.include_router(identities.router)

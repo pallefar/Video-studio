@@ -49,6 +49,7 @@ class AssetOrigin(str, Enum):
 class GenerationKind(str, Enum):
     text_to_video = "text_to_video"
     image_to_video = "image_to_video"
+    video_to_video = "video_to_video"  # VFX restyle lane (M13)
     image = "image"
     upscale = "upscale"
 
@@ -406,6 +407,18 @@ class StyleTemplateRead(BaseModel):
     params: dict = {}
 
 
+class EffectPresetRead(BaseModel):
+    """One-click VFX applied to existing footage over the VACE v2v lane
+    (M13); stacks with camera presets — the Higgsfield 'Mix' mechanic."""
+
+    id: str
+    label: str
+    description: str
+    category: str
+    prompt_template: str
+    stackable: bool = True
+
+
 # ---------------------------------------------------------------------------
 # Project — the container: asset center first, video center after (M20).
 # Assets link many-to-many so one asset serves any number of projects and
@@ -536,6 +549,9 @@ class Generation(GenerationBase, table=True):
     project_id: Optional[uuid.UUID] = Field(default=None, foreign_key="projects.id")
     # Face-bearing generation: set only after the C6 consent gate has passed.
     identity_id: Optional[uuid.UUID] = Field(default=None, foreign_key="identities.id")
+    # v2v/upscale (M13): the library asset this generation derives from —
+    # the provenance chain walks output asset -> generation -> source asset.
+    source_asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -558,6 +574,7 @@ class GenerationRead(GenerationBase):
     asset_id: Optional[uuid.UUID] = None
     project_id: Optional[uuid.UUID] = None
     identity_id: Optional[uuid.UUID] = None
+    source_asset_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
 
@@ -794,6 +811,7 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     LoraRef,
     CameraPresetRead,
     StyleTemplateRead,
+    EffectPresetRead,
     IdentityCreate,
     IdentityRead,
     ConsentRecord,

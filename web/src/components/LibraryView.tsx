@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AssetRead } from "../types/schema";
+import type { AssetRead, EffectPresetRead } from "../types/schema";
 
 export default function LibraryView() {
   const [assets, setAssets] = useState<AssetRead[]>([]);
+  const [effects, setEffects] = useState<EffectPresetRead[]>([]);
+  const [fxTarget, setFxTarget] = useState<AssetRead | null>(null);
+  const [fxSelected, setFxSelected] = useState<string[]>([]);
+  const [fxPreview, setFxPreview] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -12,11 +17,56 @@ export default function LibraryView() {
       .catch((e: Error) => setError(e.message));
   }, []);
 
-  useEffect(refresh, [refresh]);
+  useEffect(() => {
+    fetch("/effects").then((r) => r.json()).then(setEffects);
+    refresh();
+  }, [refresh]);
 
   const act = (id: string, action: "approve" | "flag") => {
     fetch(`/assets/${id}/${action}`, { method: "POST" }).then(refresh);
   };
+
+  const toggleFx = (id: string) =>
+    setFxSelected((current) =>
+      current.includes(id)
+        ? current.filter((x) => x !== id)
+        : current.length < 3
+          ? [...current, id]
+          : current,
+    );
+
+  const post = (path: string, body: unknown, done: string) => {
+    setError(null);
+    setNotice(null);
+    fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(async (r) => {
+        if (!r.ok) throw new Error((await r.json()).detail ?? `HTTP ${r.status}`);
+        setNotice(done);
+        setFxTarget(null);
+        setFxSelected([]);
+        refresh();
+      })
+      .catch((e: Error) => setError(e.message));
+  };
+
+  const applyFx = () =>
+    fxTarget &&
+    post(
+      "/effects/apply",
+      { asset_id: fxTarget.id, effect_ids: fxSelected, preview: fxPreview },
+      "Effect generation queued — the derived asset lands in the library when done.",
+    );
+
+  const upscale = (asset: AssetRead) =>
+    post(
+      "/effects/upscale",
+      { asset_id: asset.id },
+      "Finishing pass queued — the upscaled asset lands in the library when done.",
+    );
 
   return (
     <section>
@@ -26,8 +76,60 @@ export default function LibraryView() {
       </p>
       {error && (
         <p role="alert" className="mb-4 text-sm text-red-400">
-          Failed to load assets: {error}
+          {error}
         </p>
+      )}
+      {notice && <p className="mb-4 text-sm text-emerald-400">{notice}</p>}
+
+      {fxTarget && (
+        <div className="mb-4 rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+          <p className="mb-2 text-sm text-zinc-300">
+            Effects on <span className="text-zinc-100">{fxTarget.caption ?? fxTarget.uri}</span>
+            <span className="ml-2 text-xs text-zinc-500">stack up to 3 · derives a new asset</span>
+          </p>
+          <div className="mb-3 flex flex-wrap gap-2">
+            {effects.map((effect) => (
+              <button
+                key={effect.id}
+                onClick={() => toggleFx(effect.id)}
+                title={effect.description}
+                className={`rounded-full px-3 py-1 text-xs transition ${
+                  fxSelected.includes(effect.id)
+                    ? "bg-zinc-100 text-zinc-900"
+                    : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                }`}
+              >
+                {effect.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
+              <input
+                type="checkbox"
+                checked={fxPreview}
+                onChange={(e) => setFxPreview(e.target.checked)}
+              />
+              fast preview (VACE 1.3B)
+            </label>
+            <button
+              onClick={applyFx}
+              disabled={fxSelected.length === 0}
+              className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+            >
+              Apply
+            </button>
+            <button
+              onClick={() => {
+                setFxTarget(null);
+                setFxSelected([]);
+              }}
+              className="rounded bg-zinc-800 px-4 py-1.5 text-xs hover:bg-zinc-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-left text-sm">
@@ -64,6 +166,23 @@ export default function LibraryView() {
                     title="Produce editor derivatives: 720p proxy, scrub thumbnails, waveform"
                   >
                     Ingest
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFxTarget(asset);
+                      setFxSelected([]);
+                    }}
+                    className="mr-2 rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+                    title="Apply VFX presets — derives a new asset, source untouched"
+                  >
+                    Effects
+                  </button>
+                  <button
+                    onClick={() => upscale(asset)}
+                    className="mr-2 rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+                    title="Finishing pass (SeedVR2 upscale) — derives a new asset"
+                  >
+                    Upscale
                   </button>
                   <button
                     onClick={() => act(asset.id!, "approve")}

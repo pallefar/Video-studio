@@ -5,7 +5,7 @@ export type JobStatus = "queued" | "tts" | "lipsync" | "assemble" | "review" | "
 
 export type AssetOrigin = "generated" | "stock" | "own";
 
-export type GenerationKind = "text_to_video" | "image_to_video" | "image" | "upscale";
+export type GenerationKind = "text_to_video" | "image_to_video" | "video_to_video" | "image" | "upscale";
 
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed";
 
@@ -170,6 +170,7 @@ export interface GenerationRead {
   asset_id?: string | null;
   project_id?: string | null;
   identity_id?: string | null;
+  source_asset_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -198,6 +199,15 @@ export interface StyleTemplateRead {
   description: string;
   prompt_suffix: string;
   params?: Record<string, unknown>;
+}
+
+export interface EffectPresetRead {
+  id: string;
+  label: string;
+  description: string;
+  category: string;
+  prompt_template: string;
+  stackable?: boolean;
 }
 
 export interface IdentityCreate {

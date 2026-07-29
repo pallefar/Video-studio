@@ -77,6 +77,18 @@ class LocalWanProvider:
             ModelSpec(self.name, "z-image-turbo", image, CLASS_LOCAL, "image daily driver, M12"),
             ModelSpec(self.name, "qwen-image", image, CLASS_LOCAL, "text-heavy thumbnails, M12"),
             ModelSpec(self.name, "sdxl", image, CLASS_LOCAL, "style LoRAs + identity training, M12"),
+            # VFX & finishing lane (M13). FILM is the interpolation pick —
+            # RIFE stays out per the licence register's training-data caveat.
+            ModelSpec(self.name, "wan2.2-vace-fun", frozenset({GenerationKind.video_to_video}),
+                      CLASS_LOCAL, "effect presets, M13"),
+            ModelSpec(self.name, "wan2.1-vace-1.3b", frozenset({GenerationKind.video_to_video}),
+                      CLASS_LOCAL, "fast effect preview, M13"),
+            ModelSpec(self.name, "seedvr2-3b", frozenset({GenerationKind.upscale}),
+                      CLASS_LOCAL, "hero-shot upscale, M13"),
+            ModelSpec(self.name, "real-esrgan", frozenset({GenerationKind.upscale}),
+                      CLASS_LOCAL, "cheap upscale lane, M13"),
+            ModelSpec(self.name, "film", frozenset({GenerationKind.upscale}),
+                      CLASS_LOCAL, "frame interpolation, M13"),
         ]
 
     def generate(self, generation: Generation) -> ProviderResult:

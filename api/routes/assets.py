@@ -232,3 +232,44 @@ async def derived_media(
         if store.exists(key):
             urls[name] = store.presign_get(key)
     return urls
+
+
+@router.get("/{asset_id}/provenance")
+async def asset_provenance(asset_id: uuid.UUID, session: Session = Depends(get_session)):
+    """Walk the derivation chain (M13): each hop is an asset plus the
+    generation that produced it (null for stock/own roots). Ordered from the
+    requested asset back to the original source."""
+    from schema.models import Generation
+
+    _get_or_404(session, asset_id)
+    chain = []
+    current: uuid.UUID | None = asset_id
+    for _ in range(10):  # derivation chains are short; cap defends against cycles
+        if current is None:
+            break
+        asset = session.get(Asset, current)
+        if asset is None:
+            break
+        generation = session.exec(
+            select(Generation).where(Generation.asset_id == current)
+        ).first()
+        chain.append(
+            {
+                "asset": AssetRead.model_validate(asset).model_dump(mode="json"),
+                "generation": None
+                if generation is None
+                else {
+                    "id": str(generation.id),
+                    "provider": generation.provider,
+                    "model": generation.model,
+                    "kind": generation.kind.value,
+                    "prompt": generation.prompt,
+                    "params": generation.params,
+                    "source_asset_id": str(generation.source_asset_id)
+                    if generation.source_asset_id
+                    else None,
+                },
+            }
+        )
+        current = generation.source_asset_id if generation is not None else None
+    return chain
