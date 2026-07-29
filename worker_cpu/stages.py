@@ -7,8 +7,10 @@ import uuid
 import structlog
 
 from pipeline_core.db import advance_job, fail_job, open_session
+from pipeline_core.embeddings import get_embedder
+from pipeline_core.stock import StockResult, download
 from pipeline_core.storage import ObjectStore
-from schema.models import JobStatus, RenderJob
+from schema.models import Asset, AssetOrigin, JobStatus, RenderJob
 
 log = structlog.get_logger()
 
@@ -33,3 +35,41 @@ def assemble_stage(job_id: str) -> None:
             fail_job(session, job, f"assemble: {exc}")
             raise
         advance_job(session, job, JobStatus.review)
+
+
+def stock_ingest_stage(result: dict) -> str:
+    """Download one stock search result into the object store and create the
+    Asset row. The Asset only exists once its bytes are safely in MinIO.
+
+    Structural rules (docs/psd.md §4.1): license and source_url are persisted
+    always; has_identifiable_people defaults True until a human clears it;
+    the asset starts unapproved.
+    """
+    stock = StockResult(**result)
+    if not stock.license or not stock.source_url:
+        raise ValueError("stock ingest requires license and source_url")
+
+    store = ObjectStore()
+    data = download(stock.download_url)
+    extension = "mp4" if stock.kind == "video" else "jpg"
+    key = f"assets/stock/{stock.provider}/{stock.external_id}.{extension}"
+    uri = store.put_bytes(key, data)
+
+    embedding = get_embedder().embed(stock.caption)
+    with open_session() as session:
+        asset = Asset(
+            origin=AssetOrigin.stock,
+            uri=uri,
+            caption=stock.caption,
+            duration_ms=stock.duration_ms,
+            has_identifiable_people=True,
+            license=stock.license,
+            source_url=stock.source_url,
+            approved=False,
+            embedding=embedding,
+        )
+        session.add(asset)
+        session.commit()
+        asset_id = str(asset.id)
+    log.info("stock_ingested", provider=stock.provider, external_id=stock.external_id, uri=uri)
+    return asset_id

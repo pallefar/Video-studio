@@ -87,13 +87,13 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 
 ## M8 — Stock ingest + asset library
 
-- [ ] Pexels + Pixabay clients behind one `StockProvider` interface
-- [ ] Ingest downloads to MinIO, persists `license`, `source_url`, `origin='stock'`
-- [ ] `has_identifiable_people` defaults `true` on stock ingest; resolver excludes flagged assets
-- [ ] Caption embedding + cosine search over the library
-- [ ] Library browser in the control panel with an approve/flag toggle
+- [x] Pexels + Pixabay clients behind one `StockProvider` interface *(pipeline_core/stock.py; keys via env, keyless providers unregistered)*
+- [x] Ingest downloads to MinIO, persists `license`, `source_url`, `origin='stock'` *(cpu-lane `stock_ingest_stage`; Asset row exists only after bytes land)*
+- [x] `has_identifiable_people` defaults `true` on stock ingest; resolver excludes flagged assets
+- [x] Caption embedding + cosine search over the library *(deterministic hashing embedder default; `pip install -e ".[embed]"` swaps in MiniLM on CPU)*
+- [x] Library browser in the control panel with an approve/flag toggle *(minimal — full panel at M7)*
 
-**Accept:** `pytest tests/test_asset_resolver.py` passes, including the case that a flagged asset is never returned
+**Accept:** `pytest tests/test_asset_resolver.py` passes, including the case that a flagged asset is never returned ✅ (2026-07-29)
 
 ## M9 — Generative B-roll lane
 

@@ -1,14 +1,48 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from api.db import get_session
+from api.routes.jobs import get_dispatcher
+from pipeline_core.dispatch import Dispatcher
+from pipeline_core.embeddings import Embedder, get_embedder
+from pipeline_core.queues import QUEUE_CPU
+from pipeline_core.resolver import DEFAULT_THRESHOLD, resolve_asset
+from pipeline_core.stock import StockKind, StockResult, get_providers
 from schema.models import Asset, AssetCreate, AssetRead
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+
+def get_stock_providers() -> list:
+    return get_providers()
+
+
+_embedder: Embedder | None = None
+
+
+def get_embedder_dep() -> Embedder:
+    global _embedder
+    if _embedder is None:
+        _embedder = get_embedder()
+    return _embedder
+
+
+class StockSearchResult(BaseModel):
+    provider: str
+    external_id: str
+    kind: StockKind
+    caption: str
+    download_url: str
+    preview_url: str
+    source_url: str
+    license: str
+    duration_ms: int | None = None
 
 
 def _get_or_404(session: Session, asset_id: uuid.UUID) -> Asset:
@@ -32,9 +66,57 @@ async def list_assets(session: Session = Depends(get_session)):
     return session.exec(select(Asset).order_by(Asset.created_at)).all()
 
 
+@router.get("/resolve", response_model=AssetRead)
+async def resolve(
+    query: str = Query(min_length=2),
+    threshold: float = DEFAULT_THRESHOLD,
+    session: Session = Depends(get_session),
+    embedder: Embedder = Depends(get_embedder_dep),
+):
+    """Tier-1 resolution. 404 means: fall through to stock search (tier 2) or
+    the generative lane (tier 3). Flagged/unapproved assets are never returned."""
+    asset = resolve_asset(session, query, embedder, threshold)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="no approved asset above threshold")
+    return asset
+
+
 @router.get("/{asset_id}", response_model=AssetRead)
 async def get_asset(asset_id: uuid.UUID, session: Session = Depends(get_session)):
     return _get_or_404(session, asset_id)
+
+
+@router.get("/stock/search", response_model=list[StockSearchResult])
+async def stock_search(
+    query: str = Query(min_length=2),
+    kind: StockKind = "video",
+    providers: list = Depends(get_stock_providers),
+):
+    if not providers:
+        raise HTTPException(
+            status_code=503,
+            detail="no stock providers configured — set PEXELS_API_KEY / PIXABAY_API_KEY",
+        )
+    results: list[StockSearchResult] = []
+    for provider in providers:
+        results.extend(StockSearchResult(**asdict(r)) for r in provider.search(query, kind))
+    return results
+
+
+@router.post("/stock/ingest", status_code=202)
+async def stock_ingest(
+    body: StockSearchResult,
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+):
+    """Enqueue the download onto the cpu lane; the Asset row appears once the
+    bytes are in MinIO (see worker_cpu.stages.stock_ingest_stage)."""
+    if not body.license or not body.source_url:
+        raise HTTPException(status_code=422, detail="stock ingest requires license and source_url")
+    job_key = f"stock-ingest-{body.provider}-{body.external_id}"
+    dispatcher.enqueue(
+        QUEUE_CPU, "worker_cpu.stages.stock_ingest_stage", body.model_dump(), job_key=job_key
+    )
+    return {"queued": job_key}
 
 
 @router.post("/{asset_id}/approve", response_model=AssetRead)
