@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment / secrets
+.env
+CLAUDE.local.md
+
+# Node
+node_modules/
+web/dist/
+
+# Local scratch
+*.sqlite3
+*.db
+
+# Model weights (downloaded via scripts, never committed)
+weights/
