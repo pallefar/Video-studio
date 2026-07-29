@@ -39,3 +39,8 @@ class Settings(BaseSettings):
     # Prompt enhancement (M18): path to the Qwen3.5-4B GGUF; empty -> the
     # deterministic heuristic enhancer is used.
     qwen_model_path: str = ""
+
+    # Dev engines (DEV_ENGINES=1): placeholder TTS/lipsync so the full avatar
+    # pipeline runs end-to-end on machines without CUDA (Apple Silicon, CI).
+    # Output is watchable but NOT production: static avatar, synthetic voice.
+    dev_engines: bool = False

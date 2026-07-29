@@ -33,13 +33,21 @@ _engines = None
 def get_engines():
     global _engines
     if _engines is None:
-        from worker_gpu.engines.lipsync import MuseTalkEngine
-        from worker_gpu.engines.tts import ChatterboxEngine
+        from pipeline_core.settings import Settings
 
         store = ObjectStore()
-        tts = ChatterboxEngine(store)
+        if Settings().dev_engines:
+            # DEV_ENGINES=1: placeholder engines so the full pipeline runs
+            # without CUDA (Apple Silicon / CI). Loudly non-production.
+            from worker_gpu.engines.dev import DevLipsyncEngine, DevTTSEngine
+
+            tts, lipsync = DevTTSEngine(store), DevLipsyncEngine(store)
+        else:
+            from worker_gpu.engines.lipsync import MuseTalkEngine
+            from worker_gpu.engines.tts import ChatterboxEngine
+
+            tts, lipsync = ChatterboxEngine(store), MuseTalkEngine(store)
         tts.load()
-        lipsync = MuseTalkEngine(store)
         lipsync.load()
         _engines = (tts, lipsync)
     return _engines

@@ -65,6 +65,9 @@ studio, multi-track editor, and a model-provider aggregation layer — see
 
 ## Commands
 - `docker compose up -d` — postgres, redis, minio
+- `./scripts/dev_up.sh` — whole studio on a non-CUDA machine (Apple Silicon
+  Mac, CI): DEV_ENGINES=1 placeholder voice/lipsync, real everything else.
+  See docs/mac-dev.md. Dev engines are opt-in env only — never the default.
 - `python scripts/verify_gpu.py` — run before debugging anything GPU-related
 - `python worker_gpu/run.py` — native venv, not compose
 - `pytest tests/test_compliance.py` — must pass before any publish work
