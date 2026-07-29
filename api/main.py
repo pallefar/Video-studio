@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from api.routes import (
     assets,
     generations,
+    identities,
     jobs,
     loops,
     metrics,
@@ -24,6 +25,7 @@ def create_app() -> FastAPI:
     app.include_router(voices.router)
     app.include_router(assets.router)
     app.include_router(generations.router)
+    app.include_router(identities.router)
     app.include_router(presets.router)
     app.include_router(projects.router)
     app.include_router(storyboards.router)

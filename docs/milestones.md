@@ -179,11 +179,12 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M17 — Identity & consent ("Soul ID" equivalent)
 
-- [ ] `Identity` entity with `consent_recorded_by`/`consent_at`; training and face-bearing generation endpoints refuse identities without consent — structural, like C1–C5
-- [ ] LoRA training job (SDXL/Z-Image) on the wan lane, overnight batch
-- [ ] Trained identity usable across image studio, storyboards, avatars
+- [x] `Identity` entity with `consent_recorded_by`/`consent_at`; training and face-bearing generation endpoints refuse identities without consent — structural, like C1–C5 *(C6 in api/validators/compliance.py, re-checked in the wan-lane worker so a raw enqueue can't bypass the route; consent is append-once)*
+- [ ] LoRA training job (SDXL/Z-Image) on the wan lane, overnight batch *(stage + queue routing + exclusive-lock orchestration landed in `worker_gpu.stages.identity_training_stage`; the real trainer in `worker_gpu/engines/identity.py` is the workstation task, like M3's engines)*
+- [ ] Trained identity usable across image studio, storyboards, avatars *(generations accept `identity_id` and carry the trained LoRA uri into provider params; storyboard/avatar wiring follows the M10 executor)*
+- [x] Identities tab in the panel: create, record consent (append-once), train/retrain with status chips
 
-**Accept:** `pytest tests/test_identity_consent.py` — training/generation without recorded consent is refused at the API layer
+**Accept:** `pytest tests/test_identity_consent.py` — training/generation without recorded consent is refused at the API layer ✅ (2026-07-29)
 
 ## M18 — Audio suite & prompt intelligence
 

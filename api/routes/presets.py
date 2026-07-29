@@ -9,6 +9,7 @@ from sqlmodel import Session
 from api.db import get_session
 from api.routes.generations import get_registry
 from api.routes.jobs import get_dispatcher
+from api.validators.compliance import ComplianceError, check_identity_consented
 from pipeline_core.dispatch import Dispatcher
 from pipeline_core.generation import enqueue_generation
 from pipeline_core.presets import (
@@ -25,6 +26,7 @@ from schema.models import (
     Generation,
     GenerationRead,
     GenerationTarget,
+    Identity,
     Project,
 )
 
@@ -47,6 +49,7 @@ class PresetGenerateRequest(BaseModel):
     model: str = DEFAULT_MODEL
     fallback: list[GenerationTarget] = []
     project_id: uuid.UUID | None = None
+    identity_id: uuid.UUID | None = None
 
 
 @router.post("/generate", response_model=GenerationRead, status_code=201)
@@ -76,6 +79,17 @@ async def generate_from_presets(
     if body.project_id is not None and session.get(Project, body.project_id) is None:
         raise HTTPException(status_code=404, detail="project not found")
 
+    if body.identity_id is not None:
+        identity = session.get(Identity, body.identity_id)
+        if identity is None:
+            raise HTTPException(status_code=404, detail="identity not found")
+        try:
+            check_identity_consented(identity)
+        except ComplianceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if identity.lora_uri:
+            params["identity_lora_uri"] = identity.lora_uri
+
     generation = Generation(
         provider=body.provider,
         model=body.model,
@@ -84,6 +98,7 @@ async def generate_from_presets(
         params=params,
         fallback=[target.model_dump() for target in body.fallback],
         project_id=body.project_id,
+        identity_id=body.identity_id,
     )
     session.add(generation)
     session.commit()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ValidationError
 
-from schema.models import JobStatus, PublishConfig, RenderJob, WatermarkConfig
+from schema.models import Identity, JobStatus, PublishConfig, RenderJob, WatermarkConfig
 
 
 class ComplianceError(Exception):
@@ -46,3 +46,17 @@ def check_publishable(job: RenderJob) -> None:
         raise ComplianceError("C2", "publish.altered_content must be true")
     if publish.visibility != "private":
         raise ComplianceError("C5", "uploads land private — no path publishes directly")
+
+
+def check_identity_consented(identity: Identity) -> None:
+    """C6 (identity policy, roadmap-v2 §8): identity LoRA training and
+    face-bearing generation require recorded consent. Both consent fields are
+    checked — a table instance skipped Pydantic validation, so never trust one
+    field alone. No face-swap of third parties.
+    """
+    if not identity.consent_recorded_by or identity.consent_at is None:
+        raise ComplianceError(
+            "C6",
+            f"identity {identity.id} has no recorded consent — "
+            "training and face-bearing generation are refused",
+        )

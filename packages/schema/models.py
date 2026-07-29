@@ -65,6 +65,14 @@ class VideoFormat(str, Enum):
     short = "short"    # 9:16 1080x1920, <= 60 s (Shorts/Reels/TikTok)
 
 
+class IdentityTrainingStatus(str, Enum):
+    untrained = "untrained"
+    queued = "queued"
+    training = "training"
+    trained = "trained"
+    failed = "failed"
+
+
 # Stage names used for idempotency keys — see pipeline_core.queues.stage_key.
 STAGES: tuple[str, ...] = ("tts", "lipsync", "assemble", "captions", "watermark", "publish")
 
@@ -523,6 +531,8 @@ class Generation(GenerationBase, table=True):
     error: Optional[str] = None
     asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
     project_id: Optional[uuid.UUID] = Field(default=None, foreign_key="projects.id")
+    # Face-bearing generation: set only after the C6 consent gate has passed.
+    identity_id: Optional[uuid.UUID] = Field(default=None, foreign_key="identities.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -531,6 +541,7 @@ class GenerationCreate(GenerationBase):
     params: Optional[dict] = None
     fallback: list[GenerationTarget] = []
     project_id: Optional[uuid.UUID] = None
+    identity_id: Optional[uuid.UUID] = None
 
 
 class GenerationRead(GenerationBase):
@@ -543,6 +554,76 @@ class GenerationRead(GenerationBase):
     error: Optional[str] = None
     asset_id: Optional[uuid.UUID] = None
     project_id: Optional[uuid.UUID] = None
+    identity_id: Optional[uuid.UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Identity — "Soul ID" equivalent (M17). Identity training and face-bearing
+# generation require recorded consent (C6, roadmap-v2 §8) — structural, like
+# C1–C5: enforced in api/validators/compliance.py at the API edge and again
+# in the wan-lane worker. No face-swap of third parties.
+# ---------------------------------------------------------------------------
+
+
+class IdentityBase(SQLModel):
+    name: str
+    description: Optional[str] = None
+
+
+class Identity(IdentityBase, table=True):
+    __tablename__ = "identities"
+    __table_args__ = (UniqueConstraint("name", name="uq_identity_name"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    # Library assets (origin='own') used as training references.
+    reference_asset_ids: list[str] = Field(
+        default_factory=list, sa_column=Column(sa.JSON, nullable=False)
+    )
+    # Consent is append-once: recorded via POST /identities/{id}/consent and
+    # never editable afterwards. Both fields set together, or neither.
+    consent_recorded_by: Optional[str] = None
+    consent_at: Optional[datetime] = None
+    consent_note: Optional[str] = None
+    training_status: IdentityTrainingStatus = Field(
+        default=IdentityTrainingStatus.untrained,
+        sa_column=Column(sa.Enum(IdentityTrainingStatus, native_enum=False, length=16), nullable=False),
+    )
+    lora_uri: Optional[str] = None
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class IdentityCreate(IdentityBase):
+    reference_asset_ids: list[uuid.UUID] = []
+
+
+class ConsentRecord(BaseModel):
+    """One person's recorded consent to train and use their likeness."""
+
+    recorded_by: str
+    note: Optional[str] = None
+
+    @field_validator("recorded_by")
+    @classmethod
+    def _non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("C6: consent must name who recorded it")
+        return v.strip()
+
+
+class IdentityRead(IdentityBase):
+    id: uuid.UUID
+    reference_asset_ids: list[uuid.UUID] = []
+    consent_recorded_by: Optional[str] = None
+    consent_at: Optional[datetime] = None
+    consent_note: Optional[str] = None
+    has_consent: bool = False
+    training_status: IdentityTrainingStatus
+    lora_uri: Optional[str] = None
+    error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -687,6 +768,7 @@ EXPORTED_ENUMS: list[type[Enum]] = [
     GenerationKind,
     GenerationStatus,
     VideoFormat,
+    IdentityTrainingStatus,
 ]
 
 EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
@@ -709,6 +791,9 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     LoraRef,
     CameraPresetRead,
     StyleTemplateRead,
+    IdentityCreate,
+    IdentityRead,
+    ConsentRecord,
     ShotCreate,
     ShotRead,
     StoryboardCreate,

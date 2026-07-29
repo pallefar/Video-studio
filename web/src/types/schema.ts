@@ -11,6 +11,8 @@ export type GenerationStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type VideoFormat = "long" | "short";
 
+export type IdentityTrainingStatus = "untrained" | "queued" | "training" | "trained" | "failed";
+
 export interface WatermarkConfig {
   text?: string;
   position?: "bottom_right";
@@ -149,6 +151,7 @@ export interface GenerationCreate {
   params?: Record<string, unknown> | null;
   fallback?: GenerationTarget[];
   project_id?: string | null;
+  identity_id?: string | null;
 }
 
 export interface GenerationRead {
@@ -165,6 +168,7 @@ export interface GenerationRead {
   error?: string | null;
   asset_id?: string | null;
   project_id?: string | null;
+  identity_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -193,6 +197,33 @@ export interface StyleTemplateRead {
   description: string;
   prompt_suffix: string;
   params?: Record<string, unknown>;
+}
+
+export interface IdentityCreate {
+  name: string;
+  description?: string | null;
+  reference_asset_ids?: string[];
+}
+
+export interface IdentityRead {
+  name: string;
+  description?: string | null;
+  id: string;
+  reference_asset_ids?: string[];
+  consent_recorded_by?: string | null;
+  consent_at?: string | null;
+  consent_note?: string | null;
+  has_consent?: boolean;
+  training_status: IdentityTrainingStatus;
+  lora_uri?: string | null;
+  error?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConsentRecord {
+  recorded_by: string;
+  note?: string | null;
 }
 
 export interface ShotCreate {
