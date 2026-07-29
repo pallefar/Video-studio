@@ -136,12 +136,12 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M12 — Image studio ("Soul" equivalent)
 
-- [ ] Z-Image Turbo (daily driver), Qwen-Image (thumbnails/text), SDXL (style LoRAs) in the provider registry
-- [ ] Style preset registry (curated looks, seasonal drops are content not code)
-- [ ] Storyboard mode: multi-frame with shared seed/style ("Popcorn" equivalent)
-- [ ] Thumbnail pipeline for the YouTube flow
+- [x] Z-Image Turbo (daily driver), Qwen-Image (thumbnails/text), SDXL (style LoRAs) in the provider registry *(registry entries with kind `image`; rendering waits on the M10 wan-lane executor or an API provider, like every local model)*
+- [x] Style preset registry (curated looks, seasonal drops are content not code) *(shared with M19's style templates — one curated-look registry serves stills and video)*
+- [x] Storyboard mode: multi-frame with shared seed/style ("Popcorn" equivalent) *(`frames > 1` on `POST /images/generate`: one seed for the request, shared params recorded on every frame)*
+- [x] Thumbnail pipeline for the YouTube flow *(`POST /images/thumbnail`: 1280x720 on qwen-image, title text in the prompt template)*
 
-**Accept:** style preset → image lands in library; storyboard produces N frames with recorded shared params
+**Accept:** style preset → image lands in library; storyboard produces N frames with recorded shared params ✅ (2026-07-29, `tests/test_image_studio.py`; Images tab in the panel with engine/style/identity pickers)
 
 ## M13 — VFX & finishing lane
 
