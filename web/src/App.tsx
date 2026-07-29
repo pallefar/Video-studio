@@ -1,11 +1,12 @@
 import { useState } from "react";
-import CreateView from "./components/CreateView";
 import EditorView from "./components/EditorView";
 import LibraryView from "./components/LibraryView";
 import ProjectsView from "./components/ProjectsView";
-import StoryboardsView from "./components/StoryboardsView";
 
-type Tab = "projects" | "create" | "storyboards" | "editor" | "library";
+// Projects are the spine of the app: asset center -> video center per
+// project. The editor and the global library are the two cross-cutting
+// surfaces; everything else lives inside a project.
+type Tab = "projects" | "editor" | "library";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("projects");
@@ -27,7 +28,7 @@ export default function App() {
             </span>
           </h1>
           <nav className="flex gap-1">
-            {(["projects", "create", "storyboards", "editor", "library"] as const).map((t) => (
+            {(["projects", "editor", "library"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -45,8 +46,6 @@ export default function App() {
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
         {tab === "projects" && <ProjectsView onOpenEditor={openEditor} />}
-        {tab === "create" && <CreateView />}
-        {tab === "storyboards" && <StoryboardsView onOpenEditor={openEditor} />}
         {tab === "editor" && <EditorView openId={editorTimelineId} />}
         {tab === "library" && <LibraryView />}
       </main>

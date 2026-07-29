@@ -2,16 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 import type { AssetRead, ProjectRead } from "../types/schema";
 import CreateView from "./CreateView";
 import StoryboardsView from "./StoryboardsView";
+import Thumb from "./Thumb";
 
 type Step = "assets" | "video";
 
 function ProjectAssets({ projectId }: { projectId: string }) {
   const [projectAssets, setProjectAssets] = useState<AssetRead[]>([]);
   const [library, setLibrary] = useState<AssetRead[]>([]);
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
 
   const refresh = useCallback(() => {
     fetch(`/projects/${projectId}/assets`).then((r) => r.json()).then(setProjectAssets);
     fetch("/assets").then((r) => r.json()).then(setLibrary);
+    fetch("/assets/thumbs").then((r) => r.json()).then(setThumbs).catch(() => undefined);
   }, [projectId]);
 
   useEffect(() => {
@@ -37,6 +40,7 @@ function ProjectAssets({ projectId }: { projectId: string }) {
       key={asset.id}
       className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2.5"
     >
+      <Thumb url={thumbs[asset.id!]} />
       <span className="rounded bg-zinc-800 px-2 py-0.5 text-[10px] uppercase text-zinc-400">
         {asset.origin}
       </span>

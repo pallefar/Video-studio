@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
+  AssetRead,
   CameraPresetRead,
   StoryboardRead,
   StyleTemplateRead,
@@ -33,6 +34,10 @@ export default function StoryboardsView({
   const [shotSubject, setShotSubject] = useState("");
   const [shotPresets, setShotPresets] = useState<string[]>([]);
   const [shotDuration, setShotDuration] = useState(5);
+  const [shotMode, setShotMode] = useState<"generate" | "pool">("generate");
+  const [poolAssets, setPoolAssets] = useState<AssetRead[]>([]);
+  const [poolPick, setPoolPick] = useState("");
+  const [exportReady, setExportReady] = useState<Record<string, string>>({});
 
   const refresh = useCallback(() => {
     const query = projectId ? `?project_id=${projectId}` : "";
@@ -47,12 +52,33 @@ export default function StoryboardsView({
   useEffect(() => {
     fetch("/styles").then((r) => r.json()).then(setStyles);
     fetch("/presets").then((r) => r.json()).then(setPresets);
+    fetch(projectId ? `/projects/${projectId}/assets` : "/assets")
+      .then((r) => r.json())
+      .then((all: AssetRead[]) =>
+        setPoolAssets(all.filter((a) => /\.(mp4|webm|mov|mkv)$/i.test(a.uri ?? ""))),
+      );
     refresh();
     const timer = setInterval(refresh, 2500);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, projectId]);
 
   const board = boards.find((b) => b.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!board?.id) return;
+    const check = () =>
+      fetch(`/storyboards/${board.id}/export/status`)
+        .then((r) => r.json())
+        .then(({ ready, url }) =>
+          setExportReady((current) =>
+            ready ? { ...current, [board.id!]: url } : current,
+          ),
+        )
+        .catch(() => undefined);
+    check();
+    const timer = setInterval(check, 3000);
+    return () => clearInterval(timer);
+  }, [board?.id]);
 
   const api = (path: string, init?: RequestInit) =>
     fetch(path, init).then(async (r) => {
@@ -79,19 +105,22 @@ export default function StoryboardsView({
 
   const addShot = () => {
     if (!board) return;
+    const pooled = shotMode === "pool" ? poolAssets.find((a) => a.id === poolPick) : null;
     api(`/storyboards/${board.id}/shots`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         idx: board.shots?.length ?? 0,
-        subject: shotSubject,
-        preset_ids: shotPresets,
-        duration_target_ms: shotDuration * 1000,
+        subject: pooled ? (pooled.caption ?? "pooled asset") : shotSubject,
+        preset_ids: pooled ? [] : shotPresets,
+        asset_id: pooled ? pooled.id : null,
+        duration_target_ms: pooled?.duration_ms ?? shotDuration * 1000,
       }),
     })
       .then(() => {
         setShotSubject("");
         setShotPresets([]);
+        setPoolPick("");
       })
       .catch((e: Error) => setError(e.message));
   };
@@ -184,7 +213,17 @@ export default function StoryboardsView({
                   {board.style_id && ` · style: ${board.style_id}`} · {board.shots?.length ?? 0} shots
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {exportReady[board.id!] && (
+                  <a
+                    href={exportReady[board.id!]}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-lg bg-zinc-100 px-5 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
+                  >
+                    ⬇ Download video
+                  </a>
+                )}
                 <button
                   onClick={() =>
                     api(`/storyboards/${board.id}/edit`, { method: "POST" })
@@ -203,7 +242,7 @@ export default function StoryboardsView({
                   title={allReady ? "Compile and render" : "All shots need a finished asset first"}
                   className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
                 >
-                  Export video
+                  {exportReady[board.id!] ? "Re-export" : "Export video"}
                 </button>
               </div>
             </div>
@@ -250,46 +289,87 @@ export default function StoryboardsView({
             </div>
 
             <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-              <h3 className="mb-2 text-sm font-medium text-zinc-300">Add shot</h3>
-              <div className="mb-2 flex flex-wrap gap-1">
-                {presets.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => toggleShotPreset(p.id)}
-                    className={`rounded-full px-2.5 py-1 text-xs ${
-                      shotPresets.includes(p.id)
-                        ? "bg-emerald-900/60 text-emerald-300 ring-1 ring-emerald-600"
-                        : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-                    }`}
+              <div className="mb-2 flex items-center gap-3">
+                <h3 className="text-sm font-medium text-zinc-300">Add shot</h3>
+                <div className="flex gap-1 text-xs">
+                  {(["generate", "pool"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setShotMode(m)}
+                      className={`rounded-full px-3 py-1 ${
+                        shotMode === m ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+                      }`}
+                    >
+                      {m === "generate" ? "Generate new" : "From asset pool"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {shotMode === "generate" ? (
+                <>
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {presets.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => toggleShotPreset(p.id)}
+                        className={`rounded-full px-2.5 py-1 text-xs ${
+                          shotPresets.includes(p.id)
+                            ? "bg-emerald-900/60 text-emerald-300 ring-1 ring-emerald-600"
+                            : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      value={shotSubject}
+                      onChange={(e) => setShotSubject(e.target.value)}
+                      placeholder="Shot subject — e.g. hands typing on a keyboard"
+                      className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600"
+                    />
+                    <input
+                      type="number"
+                      min={2}
+                      max={30}
+                      value={shotDuration}
+                      onChange={(e) => setShotDuration(Number(e.target.value))}
+                      className="w-20 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+                      title="Duration (seconds)"
+                    />
+                    <button
+                      onClick={addShot}
+                      disabled={shotSubject.trim().length < 2 || shotPresets.length === 0}
+                      className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 enabled:hover:bg-white disabled:opacity-40"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex gap-2">
+                  <select
+                    value={poolPick}
+                    onChange={(e) => setPoolPick(e.target.value)}
+                    className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
                   >
-                    {p.label}
+                    <option value="">Pick a finished clip…</option>
+                    {poolAssets.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.caption ?? a.uri} {a.duration_ms != null && `(${(a.duration_ms / 1000).toFixed(1)}s)`}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={addShot}
+                    disabled={!poolPick}
+                    className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 enabled:hover:bg-white disabled:opacity-40"
+                  >
+                    Add
                   </button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={shotSubject}
-                  onChange={(e) => setShotSubject(e.target.value)}
-                  placeholder="Shot subject — e.g. hands typing on a keyboard"
-                  className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600"
-                />
-                <input
-                  type="number"
-                  min={2}
-                  max={30}
-                  value={shotDuration}
-                  onChange={(e) => setShotDuration(Number(e.target.value))}
-                  className="w-20 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
-                  title="Duration (seconds)"
-                />
-                <button
-                  onClick={addShot}
-                  disabled={shotSubject.trim().length < 2 || shotPresets.length === 0}
-                  className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 enabled:hover:bg-white disabled:opacity-40"
-                >
-                  Add
-                </button>
-              </div>
+                </div>
+              )}
             </div>
           </div>
         )}

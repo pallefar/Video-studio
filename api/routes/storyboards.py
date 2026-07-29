@@ -7,8 +7,10 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from api.db import get_session
+from api.routes.assets import get_object_store
 from api.routes.generations import get_registry
 from api.routes.jobs import get_dispatcher
+from pipeline_core.storage import ObjectStore
 from pipeline_core.dispatch import Dispatcher
 from pipeline_core.generation import enqueue_generation
 from pipeline_core.presets import PresetError, compose, validate_stack
@@ -223,6 +225,20 @@ async def generate_shot(
     session.commit()
     enqueue_generation(dispatcher, generation, registry)
     return _board_read(session, board)
+
+
+@router.get("/storyboards/{storyboard_id}/export/status")
+async def storyboard_export_status(
+    storyboard_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+):
+    """Close the export loop: ready + a download URL once the render exists."""
+    _get_board(session, storyboard_id)
+    key = f"renders/{storyboard_id}/final.mp4"
+    if store.exists(key):
+        return {"ready": True, "url": store.presign_get(key)}
+    return {"ready": False, "url": None}
 
 
 @router.post("/storyboards/{storyboard_id}/export", status_code=202)
