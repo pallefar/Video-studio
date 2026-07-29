@@ -17,6 +17,7 @@ export default defineConfig({
       "/storyboards": "http://localhost:8000",
       "/styles": "http://localhost:8000",
       "/projects": "http://localhost:8000",
+      "/timelines": "http://localhost:8000",
       "/healthz": "http://localhost:8000",
     },
   },

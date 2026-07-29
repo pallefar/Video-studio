@@ -95,7 +95,11 @@ function ProjectAssets({ projectId }: { projectId: string }) {
   );
 }
 
-export default function ProjectsView() {
+export default function ProjectsView({
+  onOpenEditor,
+}: {
+  onOpenEditor?: (timelineId: string) => void;
+}) {
   const [projects, setProjects] = useState<ProjectRead[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("assets");
@@ -190,7 +194,7 @@ export default function ProjectsView() {
               <ProjectAssets projectId={project.id!} />
             </>
           ) : (
-            <StoryboardsView projectId={project.id!} />
+            <StoryboardsView projectId={project.id!} onOpenEditor={onOpenEditor} />
           )}
         </div>
       )}

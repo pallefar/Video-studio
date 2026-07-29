@@ -249,3 +249,49 @@ export interface ProjectRead {
   asset_count?: number;
   storyboard_count?: number;
 }
+
+export interface TimelineClip {
+  id: string;
+  asset_id: string;
+  start_ms: number;
+  in_ms?: number;
+  out_ms: number;
+}
+
+export interface TextClip {
+  id: string;
+  text: string;
+  start_ms: number;
+  end_ms: number;
+  y_pct?: number;
+}
+
+export interface TimelineDocument {
+  format?: VideoFormat;
+  transition_ms?: number;
+  video_tracks?: TimelineClip[][];
+  texts?: TextClip[];
+}
+
+export interface TimelineDocCreate {
+  title: string;
+  storyboard_id?: string | null;
+  project_id?: string | null;
+  doc?: TimelineDocument;
+}
+
+export interface TimelineDocRead {
+  title: string;
+  storyboard_id?: string | null;
+  project_id?: string | null;
+  id: string;
+  version: number;
+  doc: TimelineDocument;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimelineDocSave {
+  doc: TimelineDocument;
+  base_version: number;
+}

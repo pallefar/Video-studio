@@ -64,7 +64,7 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
     from pathlib import Path
 
     from worker_cpu.ffmpeg.compiler import build_ffmpeg_args, watermark_required
-    from worker_cpu.ffmpeg.overlay import make_watermark_png
+    from worker_cpu.ffmpeg.overlay import make_text_png, make_watermark_png
 
     binary = _find_ffmpeg()
     if binary is None:
@@ -87,8 +87,15 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
                 make_watermark_png(tmp_path / "watermark.png", timeline["width"], timeline["height"])
             )
 
+        text_pngs = [
+            str(make_text_png(tmp_path / f"text_{n}.png", text["text"], timeline["height"], scale=18))
+            for n, text in enumerate(timeline.get("texts", []))
+        ]
+
         output = tmp_path / "render.mp4"
-        args = build_ffmpeg_args(timeline, shot_paths, str(output), overlay, ffmpeg_bin=binary)
+        args = build_ffmpeg_args(
+            timeline, shot_paths, str(output), overlay, text_pngs=text_pngs, ffmpeg_bin=binary
+        )
         result = subprocess.run(args, capture_output=True)
         if result.returncode != 0:
             tail = result.stderr.decode(errors="replace")[-800:]
@@ -109,9 +116,13 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
         )
         session.add(asset)
         session.commit()
-        board = session.get(Storyboard, uuid.UUID(storyboard_id))
-        if board is not None and board.project_id is not None:
-            session.add(ProjectAsset(project_id=board.project_id, asset_id=asset.id))
+        project_id = timeline.get("project_id")
+        if project_id is None:
+            board = session.get(Storyboard, uuid.UUID(storyboard_id))
+            if board is not None:
+                project_id = board.project_id
+        if project_id is not None:
+            session.add(ProjectAsset(project_id=uuid.UUID(str(project_id)), asset_id=asset.id))
             session.commit()
     log.info("export_done", storyboard_id=storyboard_id, uri=uri, watermarked=bool(overlay))
     return uri

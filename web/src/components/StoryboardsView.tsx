@@ -13,7 +13,13 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-900/60 text-red-300",
 };
 
-export default function StoryboardsView({ projectId }: { projectId?: string }) {
+export default function StoryboardsView({
+  projectId,
+  onOpenEditor,
+}: {
+  projectId?: string;
+  onOpenEditor?: (timelineId: string) => void;
+}) {
   const [boards, setBoards] = useState<StoryboardRead[]>([]);
   const [styles, setStyles] = useState<StyleTemplateRead[]>([]);
   const [presets, setPresets] = useState<CameraPresetRead[]>([]);
@@ -178,14 +184,28 @@ export default function StoryboardsView({ projectId }: { projectId?: string }) {
                   {board.style_id && ` · style: ${board.style_id}`} · {board.shots?.length ?? 0} shots
                 </p>
               </div>
-              <button
-                onClick={() => act(`/storyboards/${board.id}/export`)}
-                disabled={!allReady}
-                title={allReady ? "Compile and render" : "All shots need a finished asset first"}
-                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
-              >
-                Export video
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() =>
+                    api(`/storyboards/${board.id}/edit`, { method: "POST" })
+                      .then(async (r) => onOpenEditor?.((await r.json()).id))
+                      .catch((e: Error) => setError(e.message))
+                  }
+                  disabled={!allReady}
+                  title={allReady ? "Open in the timeline editor" : "All shots need a finished asset first"}
+                  className="rounded-lg bg-zinc-800 px-5 py-2 text-sm font-medium enabled:hover:bg-zinc-700 disabled:opacity-40"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => act(`/storyboards/${board.id}/export`)}
+                  disabled={!allReady}
+                  title={allReady ? "Compile and render" : "All shots need a finished asset first"}
+                  className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+                >
+                  Export video
+                </button>
+              </div>
             </div>
             {error && <p className="text-sm text-red-400">{error}</p>}
 

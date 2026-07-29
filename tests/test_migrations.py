@@ -24,6 +24,7 @@ EXPECTED_TABLES = {
     "shots",
     "projects",
     "project_assets",
+    "timeline_docs",
 }
 
 
