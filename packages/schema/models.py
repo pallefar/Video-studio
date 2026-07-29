@@ -396,6 +396,47 @@ class StyleTemplateRead(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Project — the container: asset center first, video center after (M20).
+# Assets link many-to-many so one asset serves any number of projects and
+# stands alone for social posting.
+# ---------------------------------------------------------------------------
+
+
+class ProjectBase(SQLModel):
+    title: str
+    description: Optional[str] = None
+
+
+class Project(ProjectBase, table=True):
+    __tablename__ = "projects"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ProjectAsset(SQLModel, table=True):
+    __tablename__ = "project_assets"
+    __table_args__ = (UniqueConstraint("project_id", "asset_id", name="uq_project_asset"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(foreign_key="projects.id", nullable=False)
+    asset_id: uuid.UUID = Field(foreign_key="assets.id", nullable=False)
+
+
+class ProjectCreate(ProjectBase):
+    pass
+
+
+class ProjectRead(ProjectBase):
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+    asset_count: int = 0
+    storyboard_count: int = 0
+
+
+# ---------------------------------------------------------------------------
 # Storyboard + Shot — per-video planning object; feeds the M15/M16 studio
 # ---------------------------------------------------------------------------
 
@@ -407,6 +448,7 @@ class StoryboardBase(SQLModel):
         sa_column=Column(sa.Enum(VideoFormat, native_enum=False, length=16), nullable=False),
     )
     style_id: Optional[str] = None
+    project_id: Optional[uuid.UUID] = Field(default=None, foreign_key="projects.id")
 
 
 class Storyboard(StoryboardBase, table=True):
@@ -440,7 +482,8 @@ class Shot(ShotBase, table=True):
 
 
 class ShotCreate(ShotBase):
-    pass
+    # Use an existing library/project asset as the shot instead of generating.
+    asset_id: Optional[uuid.UUID] = None
 
 
 class ShotRead(ShotBase):
@@ -479,6 +522,7 @@ class Generation(GenerationBase, table=True):
     cost: Optional[float] = None
     error: Optional[str] = None
     asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
+    project_id: Optional[uuid.UUID] = Field(default=None, foreign_key="projects.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -486,6 +530,7 @@ class Generation(GenerationBase, table=True):
 class GenerationCreate(GenerationBase):
     params: Optional[dict] = None
     fallback: list[GenerationTarget] = []
+    project_id: Optional[uuid.UUID] = None
 
 
 class GenerationRead(GenerationBase):
@@ -497,6 +542,7 @@ class GenerationRead(GenerationBase):
     cost: Optional[float] = None
     error: Optional[str] = None
     asset_id: Optional[uuid.UUID] = None
+    project_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
 
@@ -537,4 +583,6 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     ShotRead,
     StoryboardCreate,
     StoryboardRead,
+    ProjectCreate,
+    ProjectRead,
 ]

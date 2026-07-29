@@ -14,9 +14,14 @@ from pipeline_core.embeddings import Embedder, get_embedder
 from pipeline_core.queues import QUEUE_CPU
 from pipeline_core.resolver import DEFAULT_THRESHOLD, resolve_asset
 from pipeline_core.stock import StockKind, StockResult, get_providers
+from pipeline_core.storage import ObjectStore
 from schema.models import Asset, AssetCreate, AssetRead
 
 router = APIRouter(prefix="/assets", tags=["assets"])
+
+
+def get_object_store() -> ObjectStore:
+    return ObjectStore()
 
 
 def get_stock_providers() -> list:
@@ -84,6 +89,24 @@ async def resolve(
 @router.get("/{asset_id}", response_model=AssetRead)
 async def get_asset(asset_id: uuid.UUID, session: Session = Depends(get_session)):
     return _get_or_404(session, asset_id)
+
+
+@router.get("/{asset_id}/download")
+async def download_asset(
+    asset_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+):
+    """Presigned download URL — for posting an asset straight to social media
+    or pulling it into another tool. Assets stand alone, not just in videos."""
+    asset = _get_or_404(session, asset_id)
+    try:
+        bucket, key = ObjectStore.parse_uri(asset.uri)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=f"asset has no downloadable uri: {exc}") from exc
+    if bucket != store.bucket:
+        raise HTTPException(status_code=409, detail="asset lives outside the configured bucket")
+    return {"url": store.presign_get(key), "uri": asset.uri}
 
 
 @router.get("/stock/search", response_model=list[StockSearchResult])

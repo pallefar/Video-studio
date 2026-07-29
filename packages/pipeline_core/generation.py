@@ -26,7 +26,14 @@ from pipeline_core.providers import (
 from pipeline_core.queues import QUEUE_CPU, QUEUE_WAN
 from pipeline_core.stock import download
 from pipeline_core.storage import ObjectStore
-from schema.models import Asset, AssetOrigin, Generation, GenerationStatus, utcnow
+from schema.models import (
+    Asset,
+    AssetOrigin,
+    Generation,
+    GenerationStatus,
+    ProjectAsset,
+    utcnow,
+)
 
 log = structlog.get_logger()
 
@@ -118,6 +125,10 @@ def run_generation(
         )
         session.add(asset)
         session.commit()
+
+        if generation.project_id is not None:
+            session.add(ProjectAsset(project_id=generation.project_id, asset_id=asset.id))
+            session.commit()
 
         generation.asset_id = asset.id
         generation.external_id = result.external_id

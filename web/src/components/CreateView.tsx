@@ -18,7 +18,7 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-900/60 text-red-300",
 };
 
-export default function CreateView() {
+export default function CreateView({ projectId }: { projectId?: string }) {
   const [presets, setPresets] = useState<CameraPresetRead[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [category, setCategory] = useState<string>("all");
@@ -75,7 +75,13 @@ export default function CreateView() {
     fetch("/presets/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preset_ids: selected, subject, provider, model }),
+      body: JSON.stringify({
+        preset_ids: selected,
+        subject,
+        provider,
+        model,
+        project_id: projectId ?? null,
+      }),
     })
       .then(async (r) => {
         if (!r.ok) throw new Error((await r.json()).detail ?? `HTTP ${r.status}`);

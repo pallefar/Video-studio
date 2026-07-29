@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session
@@ -18,7 +20,13 @@ from pipeline_core.presets import (
     validate_stack,
 )
 from pipeline_core.providers import ProviderRegistry, UnknownModelError
-from schema.models import CameraPresetRead, Generation, GenerationRead, GenerationTarget
+from schema.models import (
+    CameraPresetRead,
+    Generation,
+    GenerationRead,
+    GenerationTarget,
+    Project,
+)
 
 router = APIRouter(prefix="/presets", tags=["presets"])
 
@@ -38,6 +46,7 @@ class PresetGenerateRequest(BaseModel):
     provider: str = DEFAULT_PROVIDER
     model: str = DEFAULT_MODEL
     fallback: list[GenerationTarget] = []
+    project_id: uuid.UUID | None = None
 
 
 @router.post("/generate", response_model=GenerationRead, status_code=201)
@@ -64,6 +73,9 @@ async def generate_from_presets(
     except UnknownModelError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    if body.project_id is not None and session.get(Project, body.project_id) is None:
+        raise HTTPException(status_code=404, detail="project not found")
+
     generation = Generation(
         provider=body.provider,
         model=body.model,
@@ -71,6 +83,7 @@ async def generate_from_presets(
         prompt=prompt,
         params=params,
         fallback=[target.model_dump() for target in body.fallback],
+        project_id=body.project_id,
     )
     session.add(generation)
     session.commit()

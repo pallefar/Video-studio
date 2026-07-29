@@ -21,6 +21,7 @@ from schema.models import (
     GenerationKind,
     GenerationStatus,
     GenerationTarget,
+    Project,
     Shot,
     ShotCreate,
     ShotRead,
@@ -89,6 +90,8 @@ async def create_storyboard(body: StoryboardCreate, session: Session = Depends(g
             get_style(body.style_id)
         except StyleError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.project_id is not None and session.get(Project, body.project_id) is None:
+        raise HTTPException(status_code=404, detail="project not found")
     board = Storyboard.model_validate(body)
     session.add(board)
     session.commit()
@@ -97,8 +100,13 @@ async def create_storyboard(body: StoryboardCreate, session: Session = Depends(g
 
 
 @router.get("/storyboards", response_model=list[StoryboardRead])
-async def list_storyboards(session: Session = Depends(get_session)):
-    boards = session.exec(select(Storyboard).order_by(Storyboard.created_at)).all()
+async def list_storyboards(
+    session: Session = Depends(get_session), project_id: uuid.UUID | None = None
+):
+    stmt = select(Storyboard).order_by(Storyboard.created_at)
+    if project_id is not None:
+        stmt = stmt.where(Storyboard.project_id == project_id)
+    boards = session.exec(stmt).all()
     return [_board_read(session, board) for board in boards]
 
 
@@ -112,13 +120,18 @@ async def add_shot(
     storyboard_id: uuid.UUID, body: ShotCreate, session: Session = Depends(get_session)
 ):
     board = _get_board(session, storyboard_id)
-    try:
-        validate_stack(body.preset_ids)
-    except PresetError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.asset_id is not None:
+        # An existing library/project asset serves as this shot directly.
+        if session.get(Asset, body.asset_id) is None:
+            raise HTTPException(status_code=404, detail="asset not found")
+    if body.preset_ids or body.asset_id is None:
+        try:
+            validate_stack(body.preset_ids)
+        except PresetError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     if any(shot.idx == body.idx for shot in _shots(session, storyboard_id)):
         raise HTTPException(status_code=409, detail=f"shot idx {body.idx} already exists")
-    shot = Shot(**body.model_dump(), storyboard_id=storyboard_id)
+    shot = Shot(**body.model_dump(exclude={"asset_id"}), storyboard_id=storyboard_id, asset_id=body.asset_id)
     session.add(shot)
     board.updated_at = utcnow()
     session.add(board)
@@ -161,8 +174,10 @@ async def generate_shot(
     if shot is None or shot.storyboard_id != storyboard_id:
         raise HTTPException(status_code=404, detail="shot not found")
 
+    if not shot.preset_ids:
+        raise HTTPException(status_code=422, detail="shot uses a fixed asset — nothing to generate")
     try:
-        presets = validate_stack(list(shot.preset_ids or []))
+        presets = validate_stack(list(shot.preset_ids))
     except PresetError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -194,6 +209,7 @@ async def generate_shot(
         prompt=prompt,
         params=params,
         fallback=[target.model_dump() for target in body.fallback],
+        project_id=board.project_id,
     )
     session.add(generation)
     session.commit()
