@@ -266,6 +266,7 @@ async def export_storyboard(
             {
                 "idx": read.idx,
                 "asset_uri": assets[read.asset_id].uri,
+                "origin": assets[read.asset_id].origin.value,
                 "duration_ms": read.duration_target_ms,
                 "subject": read.subject,
             }

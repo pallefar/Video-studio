@@ -37,17 +37,84 @@ def assemble_stage(job_id: str) -> None:
         advance_job(session, job, JobStatus.review)
 
 
-def export_stage(storyboard_id: str, timeline: dict) -> None:
-    """Full-length export: timeline document -> ffmpeg filtergraph render.
-    The compiler is M16; until it lands the export waits here, exactly like
-    assemble. The timeline already carries format (long 16:9 / short 9:16),
-    style, and the ordered shot asset uris."""
-    log.info(
-        "export_pending_m16",
-        storyboard_id=storyboard_id,
-        format=timeline.get("format"),
-        shots=len(timeline.get("shots", [])),
-    )
+def _find_ffmpeg() -> str | None:
+    import shutil
+
+    binary = shutil.which("ffmpeg")
+    if binary:
+        return binary
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        return None
+
+
+def export_stage(storyboard_id: str, timeline: dict) -> str | None:
+    """Full-length export (M16): timeline document -> ffmpeg render -> asset.
+
+    The timeline carries format (long 16:9 / short 9:16), style, and ordered
+    shot uris with origins. The watermark decision lives inside the compiler
+    (C1 — no off-switch); the rendered export lands back in the library, and
+    in the storyboard's project pool, as an asset of its own.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    from worker_cpu.ffmpeg.compiler import build_ffmpeg_args, watermark_required
+    from worker_cpu.ffmpeg.overlay import make_watermark_png
+
+    binary = _find_ffmpeg()
+    if binary is None:
+        log.warning("export_waiting_for_ffmpeg", storyboard_id=storyboard_id)
+        return None
+
+    store = ObjectStore()
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        shot_paths = []
+        for shot in timeline["shots"]:
+            _, key = store.parse_uri(shot["asset_uri"])
+            local = tmp_path / f"shot_{shot['idx']}.mp4"
+            store.get_file(key, local)
+            shot_paths.append(str(local))
+
+        overlay = None
+        if watermark_required(timeline):
+            overlay = str(
+                make_watermark_png(tmp_path / "watermark.png", timeline["width"], timeline["height"])
+            )
+
+        output = tmp_path / "render.mp4"
+        args = build_ffmpeg_args(timeline, shot_paths, str(output), overlay, ffmpeg_bin=binary)
+        result = subprocess.run(args, capture_output=True)
+        if result.returncode != 0:
+            tail = result.stderr.decode(errors="replace")[-800:]
+            raise RuntimeError(f"ffmpeg export failed for {storyboard_id}: {tail}")
+        uri = store.put_file(f"renders/{storyboard_id}/final.mp4", output)
+
+    from schema.models import ProjectAsset, Storyboard
+
+    with open_session() as session:
+        asset = Asset(
+            origin=AssetOrigin.generated if overlay else AssetOrigin.own,
+            uri=uri,
+            caption=f"Export - {timeline.get('title', storyboard_id)}",
+            duration_ms=sum(s["duration_ms"] for s in timeline["shots"]),
+            has_identifiable_people=False,
+            approved=False,
+            embedding=get_embedder().embed(str(timeline.get("title", ""))),
+        )
+        session.add(asset)
+        session.commit()
+        board = session.get(Storyboard, uuid.UUID(storyboard_id))
+        if board is not None and board.project_id is not None:
+            session.add(ProjectAsset(project_id=board.project_id, asset_id=asset.id))
+            session.commit()
+    log.info("export_done", storyboard_id=storyboard_id, uri=uri, watermarked=bool(overlay))
+    return uri
 
 
 def generation_stage_api(generation_id: str) -> None:
