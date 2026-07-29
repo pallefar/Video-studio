@@ -142,6 +142,20 @@ Architecture (licences verified; full research in the PR history):
    any asset with `origin='generated'` (or an avatar segment). If yes, the C1
    watermark burn-in is injected into the filtergraph — structurally, same as v1.
 
+**Storyboard-first creation (owner requirement, 2026-07-29).** Every video starts
+as a `Storyboard`: an ordered list of `Shot`s (subject + camera-preset stack +
+duration target), carrying a **format** (`long` 16:9 full-length, or `short` 9:16
+capped at 60 s for Shorts/Reels) and an optional **style template** — a curated
+look ("Soul preset" equivalent: Cinematic Noir, Golden Hour, Neon Night, 16mm
+Film…) whose prompt suffix applies to every shot's generation now and whose grade
+params feed the M16 compiler later. Shots generate individually through the
+provider layer (format resolution and duration cap flow into the generation
+params); a finished shot links its asset. **Export** compiles the storyboard into
+the timeline document — refusing boards with unfinished shots and shorts over the
+60 s cap — and hands it to the M16 render compiler for the full-length render.
+The M15 editor opens the same timeline for manual refinement, so storyboard →
+timeline → render is one continuum, not three tools.
+
 ## 5. GPU scheduling on the 3090
 
 The v1 two-lane design (render lane vs wan lane, exclusive lock —

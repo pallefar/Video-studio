@@ -60,6 +60,11 @@ class GenerationStatus(str, Enum):
     failed = "failed"
 
 
+class VideoFormat(str, Enum):
+    long = "long"      # 16:9 1920x1080, full-length
+    short = "short"    # 9:16 1080x1920, <= 60 s (Shorts/Reels/TikTok)
+
+
 # Stage names used for idempotency keys — see pipeline_core.queues.stage_key.
 STAGES: tuple[str, ...] = ("tts", "lipsync", "assemble", "captions", "watermark", "publish")
 
@@ -379,6 +384,80 @@ class CameraPresetRead(BaseModel):
     loras: list[LoraRef] = []
 
 
+class StyleTemplateRead(BaseModel):
+    """A curated look applied consistently across a storyboard's shots
+    ('Soul preset' equivalent): prompt suffix now, grade/LUT params at M16."""
+
+    id: str
+    label: str
+    description: str
+    prompt_suffix: str
+    params: dict = {}
+
+
+# ---------------------------------------------------------------------------
+# Storyboard + Shot — per-video planning object; feeds the M15/M16 studio
+# ---------------------------------------------------------------------------
+
+
+class StoryboardBase(SQLModel):
+    title: str
+    format: VideoFormat = Field(
+        default=VideoFormat.long,
+        sa_column=Column(sa.Enum(VideoFormat, native_enum=False, length=16), nullable=False),
+    )
+    style_id: Optional[str] = None
+
+
+class Storyboard(StoryboardBase, table=True):
+    __tablename__ = "storyboards"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class StoryboardCreate(StoryboardBase):
+    pass
+
+
+class ShotBase(SQLModel):
+    idx: int
+    subject: str
+    preset_ids: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
+    duration_target_ms: int = 5000
+    notes: Optional[str] = None
+
+
+class Shot(ShotBase, table=True):
+    __tablename__ = "shots"
+    __table_args__ = (UniqueConstraint("storyboard_id", "idx", name="uq_shot_board_idx"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    storyboard_id: uuid.UUID = Field(foreign_key="storyboards.id", nullable=False)
+    generation_id: Optional[uuid.UUID] = Field(default=None, foreign_key="generations.id")
+    asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
+
+
+class ShotCreate(ShotBase):
+    pass
+
+
+class ShotRead(ShotBase):
+    id: uuid.UUID
+    storyboard_id: uuid.UUID
+    generation_id: Optional[uuid.UUID] = None
+    asset_id: Optional[uuid.UUID] = None
+    generation_status: Optional[GenerationStatus] = None
+
+
+class StoryboardRead(StoryboardBase):
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+    shots: list[ShotRead] = []
+
+
 class GenerationBase(SQLModel):
     provider: str
     model: str
@@ -426,7 +505,13 @@ class GenerationRead(GenerationBase):
 # Export manifests for the TS generator — order is the file order, keep stable
 # ---------------------------------------------------------------------------
 
-EXPORTED_ENUMS: list[type[Enum]] = [JobStatus, AssetOrigin, GenerationKind, GenerationStatus]
+EXPORTED_ENUMS: list[type[Enum]] = [
+    JobStatus,
+    AssetOrigin,
+    GenerationKind,
+    GenerationStatus,
+    VideoFormat,
+]
 
 EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     WatermarkConfig,
@@ -447,4 +532,9 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     GenerationRead,
     LoraRef,
     CameraPresetRead,
+    StyleTemplateRead,
+    ShotCreate,
+    ShotRead,
+    StoryboardCreate,
+    StoryboardRead,
 ]

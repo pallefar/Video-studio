@@ -9,6 +9,8 @@ export type GenerationKind = "text_to_video" | "image_to_video" | "image" | "ups
 
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed";
 
+export type VideoFormat = "long" | "short";
+
 export interface WatermarkConfig {
   text?: string;
   position?: "bottom_right";
@@ -181,4 +183,49 @@ export interface CameraPresetRead {
   prompt_template: string;
   stackable?: boolean;
   loras?: LoraRef[];
+}
+
+export interface StyleTemplateRead {
+  id: string;
+  label: string;
+  description: string;
+  prompt_suffix: string;
+  params?: Record<string, unknown>;
+}
+
+export interface ShotCreate {
+  idx: number;
+  subject: string;
+  preset_ids?: string[];
+  duration_target_ms?: number;
+  notes?: string | null;
+}
+
+export interface ShotRead {
+  idx: number;
+  subject: string;
+  preset_ids?: string[];
+  duration_target_ms?: number;
+  notes?: string | null;
+  id: string;
+  storyboard_id: string;
+  generation_id?: string | null;
+  asset_id?: string | null;
+  generation_status?: GenerationStatus | null;
+}
+
+export interface StoryboardCreate {
+  title: string;
+  format?: VideoFormat;
+  style_id?: string | null;
+}
+
+export interface StoryboardRead {
+  title: string;
+  format?: VideoFormat;
+  style_id?: string | null;
+  id: string;
+  created_at: string;
+  updated_at: string;
+  shots?: ShotRead[];
 }
