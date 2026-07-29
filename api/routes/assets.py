@@ -71,6 +71,18 @@ async def list_assets(session: Session = Depends(get_session)):
     return session.exec(select(Asset).order_by(Asset.created_at)).all()
 
 
+@router.get("/thumbs")
+async def asset_thumbnails(store: ObjectStore = Depends(get_object_store)):
+    """One call, every available thumbnail: {asset_id: presigned sprite url}.
+    Sprites exist once an asset has been ingested (M14)."""
+    urls: dict[str, str] = {}
+    for key in store.list_keys("assets/derived/"):
+        if key.endswith("/sprite.jpg"):
+            asset_id = key.split("/")[2]
+            urls[asset_id] = store.presign_get(key)
+    return urls
+
+
 @router.post("/upload", response_model=AssetRead, status_code=201)
 async def upload_asset(
     file: UploadFile,
