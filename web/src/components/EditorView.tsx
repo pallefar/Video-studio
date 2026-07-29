@@ -206,7 +206,8 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       if (!video) {
         video = document.createElement("video");
         video.src = media[active.asset_id];
-        video.crossOrigin = "anonymous";
+        // no crossOrigin: we draw but never read pixels back, so a tainted
+        // canvas is fine and the preview works without S3 CORS config
         video.muted = true;
         video.preload = "auto";
         videosRef.current[active.asset_id] = video;
