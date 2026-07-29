@@ -15,14 +15,14 @@ see docs/psd.md §5 for full rationale.
 
 ## M1 — Schema + API skeleton
 
-- [ ] Pydantic models for all §4 entities
-- [ ] `export_ts.py` generates TS types; a schema change that isn't re-exported fails CI
-- [ ] Postgres via Alembic
-- [ ] CRUD for jobs, loops, voice profiles
-- [ ] All storage access through an S3 client behind one interface — no `open()` on a job artefact anywhere outside it
-- [ ] All service addresses from env vars; no `localhost` literal in worker code
+- [x] Pydantic models for all §4 entities
+- [x] `export_ts.py` generates TS types; a schema change that isn't re-exported fails CI
+- [x] Postgres via Alembic *(initial migration authored and CI-tested against a Postgres service; MinIO bucket provisioning via `ObjectStore.ensure_bucket()` — run against live services on the workstation)*
+- [x] CRUD for jobs, loops, voice profiles
+- [x] All storage access through an S3 client behind one interface — no `open()` on a job artefact anywhere outside it
+- [x] All service addresses from env vars; no `localhost` literal in worker code
 
-**Accept:** `pytest tests/test_schema_roundtrip.py tests/test_portability.py` passes
+**Accept:** `pytest tests/test_schema_roundtrip.py tests/test_portability.py` passes ✅ (2026-07-29)
 
 ## M2 — Loop preprocessing
 
@@ -55,9 +55,9 @@ see docs/psd.md §5 for full rationale.
 
 ## M5 — Compliance gate
 
-- [ ] Validator rejects any job with `watermark.persistent != true`
-- [ ] Validator rejects any job with `publish.altered_content != true`
-- [ ] Provenance record written before publish is permitted
+- [ ] Validator rejects any job with `watermark.persistent != true` *(schema-level validator + gate + tests landed with M1; frame-sampling pending)*
+- [ ] Validator rejects any job with `publish.altered_content != true` *(schema-level validator + gate + tests landed with M1)*
+- [ ] Provenance record written before publish is permitted *(publish route enforces this since M1)*
 - [ ] Frame sampling asserts watermark pixels present at 10%, 50%, 90% of duration
 
 **Accept:** `pytest tests/test_compliance.py` passes, including the negative cases
