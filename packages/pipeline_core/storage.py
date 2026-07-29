@@ -66,7 +66,11 @@ class ObjectStore:
         return self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
 
     def put_file(self, key: str, path: Path) -> str:
-        self.client.upload_file(str(path), self.bucket, key)
+        import mimetypes
+
+        content_type, _ = mimetypes.guess_type(key)
+        extra = {"ContentType": content_type} if content_type else {}
+        self.client.upload_file(str(path), self.bucket, key, ExtraArgs=extra)
         return self.uri_for(key)
 
     def get_file(self, key: str, path: Path) -> Path:

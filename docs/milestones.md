@@ -160,12 +160,13 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M15 — Timeline editor MVP
 
-- [ ] Timeline JSON schema modelled on OpenTimelineIO semantics (validated server-side)
-- [ ] Multi-track React timeline: trim, split, move, snap; text overlays; audio tracks
-- [ ] Client-side canvas preview over proxies (mediabunny + WebCodecs); "close-enough" WYSIWYG
-- [ ] Timeline persists as a document entity, versioned
+- [x] Timeline JSON schema modelled on OpenTimelineIO semantics (validated server-side: trim ranges, per-track overlap rejection)
+- [x] Multi-track React timeline: trim, split, move, snap, zoom; text overlay track *(audio tracks land with M18's music beds; extra video overlay tracks render post-MVP)*
+- [x] Client-side canvas preview over presigned sources — no server round-trips per frame *(mediabunny + WebCodecs over 720p proxies upgrades this with M14's ingest pipeline)*
+- [x] Timeline persists as a document entity, versioned (optimistic concurrency: stale saves 409)
+- [x] Storyboard → editor hand-off (`POST /storyboards/{id}/edit`) and editor export through the M16 compiler with trims + timed text overlays
 
-**Accept:** editor round-trip test: build timeline → save → reload → identical JSON; preview renders without server round-trips
+**Accept:** editor round-trip test: build timeline → save → reload → identical JSON; preview renders without server round-trips ✅ (2026-07-29, `tests/test_timeline_editor.py`)
 
 ## M16 — Server render compiler
 

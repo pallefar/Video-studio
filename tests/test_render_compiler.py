@@ -139,7 +139,7 @@ def _render(ffmpeg_bin, timeline, clips, out_dir: Path, name: str) -> Path:
     if watermark_required(timeline):
         overlay = str(make_watermark_png(out_dir / f"{name}-wm.png", timeline["width"], timeline["height"]))
     output = out_dir / f"{name}.mp4"
-    args = build_ffmpeg_args(timeline, [str(c) for c in clips], str(output), overlay, ffmpeg_bin)
+    args = build_ffmpeg_args(timeline, [str(c) for c in clips], str(output), overlay, ffmpeg_bin=ffmpeg_bin)
     subprocess.run(args, check=True, capture_output=True)
     assert output.stat().st_size > 1000
     return output

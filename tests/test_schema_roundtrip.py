@@ -26,6 +26,12 @@ from schema.models import (
     StoryboardCreate,
     StoryboardRead,
     StyleTemplateRead,
+    TextClip,
+    TimelineClip,
+    TimelineDocCreate,
+    TimelineDocRead,
+    TimelineDocSave,
+    TimelineDocument,
     BaseLoopCreate,
     BaseLoopRead,
     PublishConfig,
@@ -160,6 +166,22 @@ SAMPLES = {
         "created_at": utcnow(),
         "updated_at": utcnow(),
     },
+    TimelineClip: {"id": "c1", "asset_id": _UUID, "start_ms": 0, "out_ms": 2000},
+    TextClip: {"id": "t1", "text": "Hello", "start_ms": 0, "end_ms": 900},
+    TimelineDocument: {
+        "video_tracks": [[{"id": "c1", "asset_id": _UUID, "start_ms": 0, "out_ms": 2000}]],
+        "texts": [{"id": "t1", "text": "Hello", "start_ms": 0, "end_ms": 900}],
+    },
+    TimelineDocCreate: {"title": "Edit me"},
+    TimelineDocRead: {
+        "title": "Edit me",
+        "id": _UUID,
+        "version": 3,
+        "doc": {},
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
+    },
+    TimelineDocSave: {"doc": {}, "base_version": 3},
 }
 
 

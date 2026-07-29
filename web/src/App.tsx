@@ -1,13 +1,20 @@
 import { useState } from "react";
 import CreateView from "./components/CreateView";
+import EditorView from "./components/EditorView";
 import LibraryView from "./components/LibraryView";
 import ProjectsView from "./components/ProjectsView";
 import StoryboardsView from "./components/StoryboardsView";
 
-type Tab = "projects" | "create" | "storyboards" | "library";
+type Tab = "projects" | "create" | "storyboards" | "editor" | "library";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("projects");
+  const [editorTimelineId, setEditorTimelineId] = useState<string | null>(null);
+
+  const openEditor = (timelineId: string) => {
+    setEditorTimelineId(timelineId);
+    setTab("editor");
+  };
 
   return (
     <div className="min-h-screen">
@@ -20,7 +27,7 @@ export default function App() {
             </span>
           </h1>
           <nav className="flex gap-1">
-            {(["projects", "create", "storyboards", "library"] as const).map((t) => (
+            {(["projects", "create", "storyboards", "editor", "library"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -37,9 +44,10 @@ export default function App() {
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
-        {tab === "projects" && <ProjectsView />}
+        {tab === "projects" && <ProjectsView onOpenEditor={openEditor} />}
         {tab === "create" && <CreateView />}
-        {tab === "storyboards" && <StoryboardsView />}
+        {tab === "storyboards" && <StoryboardsView onOpenEditor={openEditor} />}
+        {tab === "editor" && <EditorView openId={editorTimelineId} />}
         {tab === "library" && <LibraryView />}
       </main>
     </div>

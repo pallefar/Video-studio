@@ -548,6 +548,97 @@ class GenerationRead(GenerationBase):
 
 
 # ---------------------------------------------------------------------------
+# Timeline documents — the M15 editor's data model, OTIO-modelled:
+# tracks hold clips positioned on the timeline (start_ms) with a trim range
+# into their source (in_ms/out_ms). Track 0 is the base video track.
+# ---------------------------------------------------------------------------
+
+
+class TimelineClip(BaseModel):
+    id: str
+    asset_id: str
+    start_ms: int
+    in_ms: int = 0
+    out_ms: int
+
+    @model_validator(mode="after")
+    def _valid_range(self) -> "TimelineClip":
+        if self.start_ms < 0 or self.in_ms < 0:
+            raise ValueError("clip times must be non-negative")
+        if self.out_ms <= self.in_ms:
+            raise ValueError("clip out_ms must be greater than in_ms")
+        return self
+
+
+class TextClip(BaseModel):
+    id: str
+    text: str
+    start_ms: int
+    end_ms: int
+    y_pct: float = 0.8
+
+    @model_validator(mode="after")
+    def _valid_range(self) -> "TextClip":
+        if self.start_ms < 0 or self.end_ms <= self.start_ms:
+            raise ValueError("text clip needs end_ms > start_ms >= 0")
+        if not 0.0 <= self.y_pct <= 1.0:
+            raise ValueError("y_pct must be within [0, 1]")
+        return self
+
+
+class TimelineDocument(BaseModel):
+    format: VideoFormat = VideoFormat.long
+    transition_ms: int = 0
+    video_tracks: list[list[TimelineClip]] = [[]]
+    texts: list[TextClip] = []
+
+    @model_validator(mode="after")
+    def _no_overlaps(self) -> "TimelineDocument":
+        for track in self.video_tracks:
+            ordered = sorted(track, key=lambda c: c.start_ms)
+            for a, b in zip(ordered, ordered[1:]):
+                if a.start_ms + (a.out_ms - a.in_ms) > b.start_ms:
+                    raise ValueError(f"clips {a.id} and {b.id} overlap on the same track")
+        return self
+
+
+class TimelineDocBase(SQLModel):
+    title: str
+    storyboard_id: Optional[uuid.UUID] = Field(default=None, foreign_key="storyboards.id")
+    project_id: Optional[uuid.UUID] = Field(default=None, foreign_key="projects.id")
+
+
+class TimelineDoc(TimelineDocBase, table=True):
+    __tablename__ = "timeline_docs"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    version: int = 1
+    doc: TimelineDocument = Field(
+        default_factory=TimelineDocument,
+        sa_column=Column(PydanticJSON(TimelineDocument), nullable=False),
+    )
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class TimelineDocCreate(TimelineDocBase):
+    doc: TimelineDocument = TimelineDocument()
+
+
+class TimelineDocRead(TimelineDocBase):
+    id: uuid.UUID
+    version: int
+    doc: TimelineDocument
+    created_at: datetime
+    updated_at: datetime
+
+
+class TimelineDocSave(BaseModel):
+    doc: TimelineDocument
+    base_version: int
+
+
+# ---------------------------------------------------------------------------
 # Export manifests for the TS generator — order is the file order, keep stable
 # ---------------------------------------------------------------------------
 
@@ -585,4 +676,10 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     StoryboardRead,
     ProjectCreate,
     ProjectRead,
+    TimelineClip,
+    TextClip,
+    TimelineDocument,
+    TimelineDocCreate,
+    TimelineDocRead,
+    TimelineDocSave,
 ]

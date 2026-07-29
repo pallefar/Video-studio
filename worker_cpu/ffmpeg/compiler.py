@@ -25,11 +25,16 @@ def build_ffmpeg_args(
     shot_paths: list[str],
     output_path: str,
     watermark_png: str | None,
+    text_pngs: list[str] | None = None,
     ffmpeg_bin: str = "ffmpeg",
 ) -> list[str]:
     shots = timeline["shots"]
     if len(shot_paths) != len(shots):
         raise ValueError("one input path per shot required")
+    texts = timeline.get("texts", [])
+    text_pngs = text_pngs or []
+    if len(text_pngs) != len(texts):
+        raise ValueError("one pre-rendered png per text overlay required")
     width, height = timeline["width"], timeline["height"]
     needs_watermark = watermark_required(timeline)
     if needs_watermark and not watermark_png:
@@ -40,7 +45,10 @@ def build_ffmpeg_args(
     use_xfade = transition_s > 0 and len(shots) > 1
 
     args: list[str] = [ffmpeg_bin, "-y", "-hide_banner", "-nostdin"]
-    for duration, path in zip(durations, shot_paths):
+    for shot, duration, path in zip(shots, durations, shot_paths):
+        in_s = shot.get("in_ms", 0) / 1000
+        if in_s > 0:
+            args += ["-ss", f"{in_s:.3f}"]
         args += ["-t", f"{duration:.3f}", "-i", path]
 
     input_count = len(shots)
@@ -48,6 +56,12 @@ def build_ffmpeg_args(
     if needs_watermark:
         wm_index = input_count
         args += ["-i", watermark_png]
+        input_count += 1
+
+    text_indices = []
+    for png in text_pngs:
+        text_indices.append(input_count)
+        args += ["-i", png]
         input_count += 1
 
     total_s = sum(durations)
@@ -88,8 +102,21 @@ def build_ffmpeg_args(
     else:
         last = "v0"
 
+    for n, (text, index) in enumerate(zip(texts, text_indices)):
+        start_s = text["start_ms"] / 1000
+        end_s = text["end_ms"] / 1000
+        y_pct = text.get("y_pct", 0.8)
+        label = f"vt{n}"
+        filters.append(f"[{index}:v]format=rgba[t{n}]")
+        filters.append(
+            f"[{last}][t{n}]overlay=(W-w)/2:H*{y_pct:.3f}-h/2:"
+            f"enable='between(t,{start_s:.3f},{end_s:.3f})'[{label}]"
+        )
+        last = label
+
     if needs_watermark:
         # C1: visible, bottom-right, full duration — no enable= window.
+        # Applied AFTER text overlays so nothing can cover it.
         filters.append(f"[{wm_index}:v]format=rgba[wm]")
         filters.append(f"[{last}][wm]overlay=W-w-24:H-h-24[vout]")
         last = "vout"
