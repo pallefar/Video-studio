@@ -104,3 +104,89 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 - [ ] Approval gate in the control panel before an asset becomes selectable
 
 **Accept:** `pytest tests/test_gpu_exclusivity.py` proves render and generation lanes cannot hold the GPU simultaneously; an unapproved generated asset is never selected by the resolver
+
+---
+
+# v2 — Higgsfield-class studio (planned)
+
+Full plan and research: `docs/roadmap-v2.md`. Prerequisite: v1 M2–M7 shipped.
+Owner decisions 2026-07-29: clone Higgsfield's capabilities self-hosted, add a real
+multi-track video studio, and make the system a model aggregator — open models
+locally/on rented GPUs AND proprietary models via API, behind one interface.
+
+## M10 — Generation provider layer + wan-lane executor
+
+- [ ] `GenerationProvider` interface: capability discovery, submit, poll, fetch-to-MinIO; every output lands as an `Asset` (`origin='generated'`) with provider/model/params/cost provenance
+- [ ] Local provider: wan-lane executor (decide ComfyUI headless vs diffusers here) running Wan 2.2 T2V/I2V under the existing GPU lock
+- [ ] API provider class: aggregator gateway first (fal.ai or Replicate), then one direct integration (Sora or Veo); keys from env only — unconfigured providers don't appear in the registry
+- [ ] API jobs run as network jobs on the CPU lane with backoff — never touch the GPU lock
+- [ ] Fallback chains: a request may declare provider preference order
+- [ ] Benchmark on the 3090: Fun-Camera A14B GGUF + 4-step LoRA latency and VRAM (decides 14B vs 5B default)
+
+**Accept:** `pytest tests/test_providers.py` — a fake provider round-trips a generation into the asset library with full provenance; unknown models are refused; an API-provider job never acquires the GPU lock
+
+## M11 — Camera presets (the signature)
+
+- [ ] Preset registry as data (JSON): camera moves (crash zoom, dolly, dolly-zoom, orbit, FPV, bullet time…) with prompt templates + LoRA refs, stackable up to 3
+- [ ] Wan2.2-Fun-Control-Camera integration in the local provider; Civitai LoRAs individually licence-audited before inclusion
+- [ ] Preset picker UI: image in → preset → clip in library (preset-first, prompt optional)
+- [ ] Advanced mode: Uni3C custom trajectories; ReCamMaster re-shoot of existing footage
+
+**Accept:** golden-path test: preset request → generation record → asset with `origin='generated'`; a preset referencing an unaudited LoRA fails validation
+
+## M12 — Image studio ("Soul" equivalent)
+
+- [ ] Z-Image Turbo (daily driver), Qwen-Image (thumbnails/text), SDXL (style LoRAs) in the provider registry
+- [ ] Style preset registry (curated looks, seasonal drops are content not code)
+- [ ] Storyboard mode: multi-frame with shared seed/style ("Popcorn" equivalent)
+- [ ] Thumbnail pipeline for the YouTube flow
+
+**Accept:** style preset → image lands in library; storyboard produces N frames with recorded shared params
+
+## M13 — VFX & finishing lane
+
+- [ ] Effect preset registry over Wan2.2-VACE-Fun (v2v restyle, levitation/disintegrate/fire-class effects); VACE 1.3B fast-preview path
+- [ ] Upscale/interpolate finishing: SeedVR2-3B hero shots, Real-ESRGAN + RIFE (or FILM) cheap lane
+- [ ] Effects stack with camera presets (Higgsfield "Mix" mechanic)
+
+**Accept:** effect preset applied to an existing library asset produces a new derived asset with provenance chain
+
+## M14 — Studio ingest pipeline
+
+- [ ] RQ fan-out per uploaded/generated asset: ffprobe metadata, 720p short-GOP proxy, sprite-sheet + WebVTT scrub thumbnails, waveform peaks (audiowaveform subprocess)
+- [ ] All artefacts in MinIO next to the source; assets browsable in the panel
+
+**Accept:** ingest of a test clip produces proxy + sprites + VTT + peaks, all addressable by URI
+
+## M15 — Timeline editor MVP
+
+- [ ] Timeline JSON schema modelled on OpenTimelineIO semantics (validated server-side)
+- [ ] Multi-track React timeline: trim, split, move, snap; text overlays; audio tracks
+- [ ] Client-side canvas preview over proxies (mediabunny + WebCodecs); "close-enough" WYSIWYG
+- [ ] Timeline persists as a document entity, versioned
+
+**Accept:** editor round-trip test: build timeline → save → reload → identical JSON; preview renders without server round-trips
+
+## M16 — Server render compiler
+
+- [ ] Timeline JSON → ffmpeg `filter_complex` compiler in the CPU worker: trim/setpts, per-track overlay, xfade transitions, PNG text overlays, amix + sidechaincompress ducking, segment-then-concat for long timelines
+- [ ] Progress reporting via `-progress` parse into the metrics table
+- [ ] **Compliance hook: timeline containing any `origin='generated'` asset or avatar footage gets the C1 watermark injected into the filtergraph; frame-sampling test extends to studio renders**
+
+**Accept:** `pytest tests/test_render_compiler.py` — golden filtergraphs for trim/transition/ducking cases; the compliance case proves a generated-asset timeline cannot render without the watermark
+
+## M17 — Identity & consent ("Soul ID" equivalent)
+
+- [ ] `Identity` entity with `consent_recorded_by`/`consent_at`; training and face-bearing generation endpoints refuse identities without consent — structural, like C1–C5
+- [ ] LoRA training job (SDXL/Z-Image) on the wan lane, overnight batch
+- [ ] Trained identity usable across image studio, storyboards, avatars
+
+**Accept:** `pytest tests/test_identity_consent.py` — training/generation without recorded consent is refused at the API layer
+
+## M18 — Audio suite & prompt intelligence
+
+- [ ] ACE-Step music-bed generation into the library (shared lane)
+- [ ] Emotion controls on Chatterbox TTS segments (Speak-style)
+- [ ] Qwen3.5-4B (CPU) prompt enhancement for Wan prompts; Florence-2 auto-captioning of assets (feeds the M8 resolver)
+
+**Accept:** music generation lands as licensed-clean library asset; a prompt-enhanced generation records both raw and enhanced prompts
