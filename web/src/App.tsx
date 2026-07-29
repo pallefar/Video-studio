@@ -1,4 +1,5 @@
 import { useState } from "react";
+import AvatarView from "./components/AvatarView";
 import CreateView from "./components/CreateView";
 import EditorView from "./components/EditorView";
 import IdentitiesView from "./components/IdentitiesView";
@@ -7,7 +8,15 @@ import LibraryView from "./components/LibraryView";
 import ProjectsView from "./components/ProjectsView";
 import StoryboardsView from "./components/StoryboardsView";
 
-type Tab = "projects" | "create" | "images" | "storyboards" | "editor" | "library" | "identities";
+type Tab =
+  | "projects"
+  | "create"
+  | "images"
+  | "avatar"
+  | "storyboards"
+  | "editor"
+  | "library"
+  | "identities";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("projects");
@@ -29,7 +38,9 @@ export default function App() {
             </span>
           </h1>
           <nav className="flex gap-1">
-            {(["projects", "create", "images", "storyboards", "editor", "library", "identities"] as const).map((t) => (
+            {(
+              ["projects", "create", "images", "avatar", "storyboards", "editor", "library", "identities"] as const
+            ).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -49,6 +60,7 @@ export default function App() {
         {tab === "projects" && <ProjectsView onOpenEditor={openEditor} />}
         {tab === "create" && <CreateView />}
         {tab === "images" && <ImagesView />}
+        {tab === "avatar" && <AvatarView />}
         {tab === "storyboards" && <StoryboardsView onOpenEditor={openEditor} />}
         {tab === "editor" && <EditorView openId={editorTimelineId} />}
         {tab === "library" && <LibraryView />}

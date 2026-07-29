@@ -78,10 +78,10 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 
 ## M7 — Control panel
 
-- [ ] Submit script, pick loop + voice profile
-- [ ] Job list with live status (TanStack Query polling, 2 s interval)
-- [ ] Preview before publish, per-segment re-render button *(backend landed with M18's emotions: `POST /jobs/{id}/segments/{idx}/rerender` with emotion/reseed)*
-- [ ] Manual publish confirmation — never automatic
+- [x] Submit script, pick loop + voice profile *(Avatar tab: script form with voice/loop pickers + inline creation)*
+- [x] Job list with live status *(2 s polling; plain fetch — TanStack Query optional later)*
+- [ ] Preview before publish, per-segment re-render button *(re-render button with emotion picker shipped; the video preview itself needs M4's assembled output)*
+- [x] Manual publish confirmation — never automatic *(review-gated Publish button asks who reviewed; C5 message states the upload lands private)*
 
 **Accept:** a full video produced without touching the terminal
 
