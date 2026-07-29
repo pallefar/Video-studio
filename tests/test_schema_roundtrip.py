@@ -12,6 +12,7 @@ from schema.models import (
     EXPORTED_ENUMS,
     EXPORTED_MODELS,
     AssetCreate,
+    AudioClip,
     AssetOrigin,
     AssetRead,
     CameraPresetRead,
@@ -167,6 +168,7 @@ SAMPLES = {
         "updated_at": utcnow(),
     },
     TimelineClip: {"id": "c1", "asset_id": _UUID, "start_ms": 0, "out_ms": 2000},
+    AudioClip: {"id": "m1", "asset_id": _UUID, "start_ms": 250, "out_ms": 2500, "gain": 0.5},
     TextClip: {"id": "t1", "text": "Hello", "start_ms": 0, "end_ms": 900},
     TimelineDocument: {
         "video_tracks": [[{"id": "c1", "asset_id": _UUID, "start_ms": 0, "out_ms": 2000}]],

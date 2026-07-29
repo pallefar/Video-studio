@@ -548,6 +548,22 @@ class GenerationRead(GenerationBase):
 
 
 # ---------------------------------------------------------------------------
+# Metrics — every stage logs its duration; throughput regressions are how
+# thermal throttling shows up (v1 convention, docs/psd.md §7).
+# ---------------------------------------------------------------------------
+
+
+class Metric(SQLModel, table=True):
+    __tablename__ = "metrics"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    stage: str
+    ref: str
+    duration_ms: int
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+# ---------------------------------------------------------------------------
 # Timeline documents — the M15 editor's data model, OTIO-modelled:
 # tracks hold clips positioned on the timeline (start_ms) with a trim range
 # into their source (in_ms/out_ms). Track 0 is the base video track.
@@ -567,6 +583,28 @@ class TimelineClip(BaseModel):
             raise ValueError("clip times must be non-negative")
         if self.out_ms <= self.in_ms:
             raise ValueError("clip out_ms must be greater than in_ms")
+        return self
+
+
+class AudioClip(BaseModel):
+    """Music/audio-bed clip. Ducked under shot audio by default (M18)."""
+
+    id: str
+    asset_id: str
+    start_ms: int
+    in_ms: int = 0
+    out_ms: int
+    gain: float = 1.0
+    duck: bool = True
+
+    @model_validator(mode="after")
+    def _valid_range(self) -> "AudioClip":
+        if self.start_ms < 0 or self.in_ms < 0:
+            raise ValueError("clip times must be non-negative")
+        if self.out_ms <= self.in_ms:
+            raise ValueError("clip out_ms must be greater than in_ms")
+        if not 0.0 <= self.gain <= 4.0:
+            raise ValueError("gain must be within [0, 4]")
         return self
 
 
@@ -590,11 +628,12 @@ class TimelineDocument(BaseModel):
     format: VideoFormat = VideoFormat.long
     transition_ms: int = 0
     video_tracks: list[list[TimelineClip]] = [[]]
+    audio_tracks: list[list[AudioClip]] = []
     texts: list[TextClip] = []
 
     @model_validator(mode="after")
     def _no_overlaps(self) -> "TimelineDocument":
-        for track in self.video_tracks:
+        for track in [*self.video_tracks, *self.audio_tracks]:
             ordered = sorted(track, key=lambda c: c.start_ms)
             for a, b in zip(ordered, ordered[1:]):
                 if a.start_ms + (a.out_ms - a.in_ms) > b.start_ms:
@@ -677,6 +716,7 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     ProjectCreate,
     ProjectRead,
     TimelineClip,
+    AudioClip,
     TextClip,
     TimelineDocument,
     TimelineDocCreate,

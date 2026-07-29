@@ -170,8 +170,8 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M16 — Server render compiler
 
-- [x] Timeline JSON → ffmpeg `filter_complex` compiler in the CPU worker: per-shot fps/scale/pad/setpts normalisation, concat or xfade transition chain, PNG watermark overlay (Pillow-rendered — no fontconfig dependency), silent stereo bed, H.264 CRF 18 yuv420p +faststart *(amix/sidechaincompress ducking + music beds land with M18; segment-then-concat optimisation when timelines get long)*
-- [ ] Progress reporting via `-progress` parse into the metrics table
+- [x] Timeline JSON → ffmpeg `filter_complex` compiler in the CPU worker: per-shot fps/scale/pad/setpts normalisation, concat or xfade transition chain, PNG watermark overlay (Pillow-rendered — no fontconfig dependency), **full audio graph: voice bus from shot audio (silent segments fill gaps, acrossfade under xfade), music bus with gain/delay, sidechaincompress ducking keyed by the voice bus**, silent bed fallback, H.264 CRF 18 yuv420p +faststart *(segment-then-concat optimisation when timelines get long)*
+- [ ] Progress reporting via `-progress` parse into the metrics table *(the metrics table + per-stage durations landed — all worker stages record; live in-render progress parsing still open)*
 - [x] **Compliance hook: the watermark decision lives INSIDE the compiler with no off-switch — any `origin='generated'` shot forces the C1 overlay (full duration, bottom-right) and compiling generated content without the overlay raises. Frame-sampling test proves watermark pixels at 10/50/90% of real rendered output**
 - [x] `export_stage` renders for real: fetch shots from the store → compile → ffmpeg (system binary or imageio-ffmpeg static) → upload → the export lands as an asset in the library and the project pool
 
@@ -187,6 +187,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M18 — Audio suite & prompt intelligence
 
+- [x] Audio infrastructure (landed ahead of the models): timeline audio tracks (`AudioClip` with gain + per-clip duck flag), shot audio forms the voice bus in exports, music beds mix under it with sidechain ducking, `POST /assets/upload` brings your own music/footage in, and every worker stage records its duration to the metrics table (`GET /metrics`)
 - [ ] ACE-Step music-bed generation into the library (shared lane)
 - [ ] Emotion controls on Chatterbox TTS segments (Speak-style)
 - [ ] Qwen3.5-4B (CPU) prompt enhancement for Wan prompts; Florence-2 auto-captioning of assets (feeds the M8 resolver)

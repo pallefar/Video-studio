@@ -7,6 +7,7 @@ from api.routes import (
     generations,
     jobs,
     loops,
+    metrics,
     presets,
     projects,
     publish,
@@ -27,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(projects.router)
     app.include_router(storyboards.router)
     app.include_router(timelines.router)
+    app.include_router(metrics.router)
     app.include_router(publish.router)
 
     @app.get("/healthz")

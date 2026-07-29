@@ -7,6 +7,7 @@ import uuid
 import structlog
 
 from pipeline_core.db import advance_job, fail_job, open_session
+from pipeline_core.metrics import timed_stage
 from pipeline_core.embeddings import get_embedder
 from pipeline_core.stock import StockResult, download
 from pipeline_core.storage import ObjectStore
@@ -15,6 +16,7 @@ from schema.models import Asset, AssetOrigin, JobStatus, RenderJob
 log = structlog.get_logger()
 
 
+@timed_stage("assemble")
 def assemble_stage(job_id: str) -> None:
     from worker_cpu.ffmpeg.assemble import assemble
 
@@ -51,6 +53,7 @@ def _find_ffmpeg() -> str | None:
         return None
 
 
+@timed_stage("export")
 def export_stage(storyboard_id: str, timeline: dict) -> str | None:
     """Full-length export (M16): timeline document -> ffmpeg render -> asset.
 
@@ -71,6 +74,8 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
         log.warning("export_waiting_for_ffmpeg", storyboard_id=storyboard_id)
         return None
 
+    from worker_cpu.ffmpeg.ingest import probe
+
     store = ObjectStore()
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -80,6 +85,15 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
             local = tmp_path / f"shot_{shot['idx']}.mp4"
             store.get_file(key, local)
             shot_paths.append(str(local))
+            # the voice bus needs to know which shots actually carry audio
+            shot["has_audio"] = bool(probe(binary, local)["has_audio"])
+
+        music_paths = []
+        for n, clip in enumerate(timeline.get("music", [])):
+            _, key = store.parse_uri(clip["asset_uri"])
+            local = tmp_path / f"music_{n}"
+            store.get_file(key, local)
+            music_paths.append(str(local))
 
         overlay = None
         if watermark_required(timeline):
@@ -94,7 +108,8 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
 
         output = tmp_path / "render.mp4"
         args = build_ffmpeg_args(
-            timeline, shot_paths, str(output), overlay, text_pngs=text_pngs, ffmpeg_bin=binary
+            timeline, shot_paths, str(output), overlay,
+            text_pngs=text_pngs, music_paths=music_paths, ffmpeg_bin=binary,
         )
         result = subprocess.run(args, capture_output=True)
         if result.returncode != 0:
@@ -133,6 +148,7 @@ def derived_prefix(asset_id: str) -> str:
     return f"assets/derived/{asset_id}"
 
 
+@timed_stage("ingest")
 def ingest_stage(asset_id: str) -> dict | None:
     """Produce editor derivatives for one asset: 720p proxy, scrub sprite
     sheet + WebVTT index, waveform peaks. Idempotent: existing derivatives
@@ -195,6 +211,7 @@ def ingest_stage(asset_id: str) -> dict | None:
     return info
 
 
+@timed_stage("generation")
 def generation_stage_api(generation_id: str) -> None:
     """API-provider generation: a network job. Deliberately no GPU lock —
     hosted models don't touch our card (asserted in tests/test_providers.py)."""
