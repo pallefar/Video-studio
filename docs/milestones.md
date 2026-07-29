@@ -153,10 +153,10 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M14 — Studio ingest pipeline
 
-- [ ] RQ fan-out per uploaded/generated asset: ffprobe metadata, 720p short-GOP proxy, sprite-sheet + WebVTT scrub thumbnails, waveform peaks (audiowaveform subprocess)
-- [ ] All artefacts in MinIO next to the source; assets browsable in the panel
+- [x] Cpu-lane ingest per asset: stream probe (parsed from `ffmpeg -i` — no ffprobe needed with the static build), 720p short-GOP proxy, sprite-sheet + WebVTT scrub thumbnails, waveform peaks (PCM extract + pure-python buckets — no audiowaveform binary needed)
+- [x] Derivatives live at the conventional `assets/derived/{asset_id}/` prefix (no schema change); `GET /assets/{id}/derived` presigns whatever exists; the editor's media endpoint prefers the proxy automatically; Ingest button in the library
 
-**Accept:** ingest of a test clip produces proxy + sprites + VTT + peaks, all addressable by URI
+**Accept:** ingest of a test clip produces proxy + sprites + VTT + peaks, all addressable by URI ✅ (2026-07-29, `tests/test_ingest_pipeline.py` — real ffmpeg end-to-end incl. idempotent re-run)
 
 ## M15 — Timeline editor MVP
 

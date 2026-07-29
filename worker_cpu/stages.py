@@ -128,6 +128,73 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
     return uri
 
 
+def derived_prefix(asset_id: str) -> str:
+    """Derived artifacts live at a conventional prefix — no schema needed."""
+    return f"assets/derived/{asset_id}"
+
+
+def ingest_stage(asset_id: str) -> dict | None:
+    """Produce editor derivatives for one asset: 720p proxy, scrub sprite
+    sheet + WebVTT index, waveform peaks. Idempotent: existing derivatives
+    are not rebuilt. Non-video assets are skipped gracefully."""
+    import json
+    import tempfile
+    from pathlib import Path
+
+    from worker_cpu.ffmpeg import ingest as ing
+
+    binary = _find_ffmpeg()
+    if binary is None:
+        log.warning("ingest_waiting_for_ffmpeg", asset_id=asset_id)
+        return None
+
+    store = ObjectStore()
+    prefix = derived_prefix(asset_id)
+    if store.exists(f"{prefix}/proxy.mp4"):
+        log.info("ingest_skip_idempotent", asset_id=asset_id)
+        return None
+
+    with open_session() as session:
+        asset = session.get(Asset, uuid.UUID(asset_id))
+        if asset is None:
+            raise ValueError(f"asset {asset_id} not found")
+        _, key = store.parse_uri(asset.uri)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        src = tmp_path / "source"
+        store.get_file(key, src)
+
+        info = ing.probe(binary, src)
+        if not info["duration_ms"] or not info["width"]:
+            log.info("ingest_skip_not_video", asset_id=asset_id)
+            return None
+
+        proxy = ing.make_proxy(binary, src, tmp_path / "proxy.mp4", info["has_audio"])
+        store.put_file(f"{prefix}/proxy.mp4", proxy)
+
+        plan = ing.sprite_plan(info["duration_ms"], info["width"], info["height"])
+        sprite = ing.make_sprites(binary, src, tmp_path / "sprite.jpg", plan)
+        store.put_file(f"{prefix}/sprite.jpg", sprite)
+        vtt = ing.make_vtt(plan, info["duration_ms"])
+        store.put_bytes(f"{prefix}/sprite.vtt", vtt.encode(), content_type="text/vtt")
+
+        peaks = ing.waveform_peaks(binary, src)
+        store.put_bytes(
+            f"{prefix}/peaks.json", json.dumps(peaks).encode(), content_type="application/json"
+        )
+
+    with open_session() as session:
+        asset = session.get(Asset, uuid.UUID(asset_id))
+        if asset is not None and asset.duration_ms is None:
+            asset.duration_ms = info["duration_ms"]
+            session.add(asset)
+            session.commit()
+
+    log.info("ingest_done", asset_id=asset_id, duration_ms=info["duration_ms"], peaks=len(peaks))
+    return info
+
+
 def generation_stage_api(generation_id: str) -> None:
     """API-provider generation: a network job. Deliberately no GPU lock —
     hosted models don't touch our card (asserted in tests/test_providers.py)."""
