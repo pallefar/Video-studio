@@ -53,6 +53,47 @@ def _find_ffmpeg() -> str | None:
         return None
 
 
+EXPORT_PROGRESS_STAGE = "export_progress"
+EXPORT_TOTAL_STAGE = "export_total"
+_PROGRESS_STEP_PCT = 10
+
+
+def _record_progress_metric(stage: str, ref: str, value_ms: int) -> None:
+    """Progress snapshots live in the metrics table like every stage duration.
+    Recording must never take the render down — failures are swallowed."""
+    try:
+        from schema.models import Metric
+
+        with open_session() as session:
+            session.add(Metric(stage=stage, ref=ref, duration_ms=value_ms))
+            session.commit()
+    except Exception as exc:
+        log.warning("progress_metric_write_failed", stage=stage, ref=ref, error=str(exc))
+
+
+class _ProgressRecorder:
+    """Throttles -progress callbacks to >=10% steps so a long render writes
+    ~10 rows, not one per ffmpeg status block."""
+
+    def __init__(self, ref: str, total_ms: int):
+        self.ref = ref
+        self.total_ms = max(1, total_ms)
+        self._last_recorded_ms = 0
+
+    def __call__(self, position_ms: int) -> None:
+        step_ms = self.total_ms * _PROGRESS_STEP_PCT // 100
+        if position_ms - self._last_recorded_ms < max(1, step_ms):
+            return
+        self._last_recorded_ms = position_ms
+        _record_progress_metric(EXPORT_PROGRESS_STAGE, self.ref, min(position_ms, self.total_ms))
+
+    def start(self) -> None:
+        _record_progress_metric(EXPORT_TOTAL_STAGE, self.ref, self.total_ms)
+
+    def finish(self) -> None:
+        _record_progress_metric(EXPORT_PROGRESS_STAGE, self.ref, self.total_ms)
+
+
 @timed_stage("export")
 def export_stage(storyboard_id: str, timeline: dict) -> str | None:
     """Full-length export (M16): timeline document -> ffmpeg render -> asset.
@@ -60,14 +101,15 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
     The timeline carries format (long 16:9 / short 9:16), style, and ordered
     shot uris with origins. The watermark decision lives inside the compiler
     (C1 — no off-switch); the rendered export lands back in the library, and
-    in the storyboard's project pool, as an asset of its own.
+    in the storyboard's project pool, as an asset of its own. Render position
+    is parsed from ffmpeg -progress into the metrics table live.
     """
-    import subprocess
     import tempfile
     from pathlib import Path
 
-    from worker_cpu.ffmpeg.compiler import build_ffmpeg_args, watermark_required
+    from worker_cpu.ffmpeg.compiler import build_ffmpeg_args, expected_duration_ms, watermark_required
     from worker_cpu.ffmpeg.overlay import make_text_png, make_watermark_png
+    from worker_cpu.ffmpeg.progress import run_ffmpeg_with_progress
 
     binary = _find_ffmpeg()
     if binary is None:
@@ -111,10 +153,12 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
             timeline, shot_paths, str(output), overlay,
             text_pngs=text_pngs, music_paths=music_paths, ffmpeg_bin=binary,
         )
-        result = subprocess.run(args, capture_output=True)
-        if result.returncode != 0:
-            tail = result.stderr.decode(errors="replace")[-800:]
-            raise RuntimeError(f"ffmpeg export failed for {storyboard_id}: {tail}")
+        recorder = _ProgressRecorder(storyboard_id, expected_duration_ms(timeline))
+        recorder.start()
+        run_ffmpeg_with_progress(
+            args, on_progress=recorder, label=f"ffmpeg export {storyboard_id}"
+        )
+        recorder.finish()
         uri = store.put_file(f"renders/{storyboard_id}/final.mp4", output)
 
     from schema.models import ProjectAsset, Storyboard

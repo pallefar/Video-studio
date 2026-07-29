@@ -171,7 +171,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 ## M16 — Server render compiler
 
 - [x] Timeline JSON → ffmpeg `filter_complex` compiler in the CPU worker: per-shot fps/scale/pad/setpts normalisation, concat or xfade transition chain, PNG watermark overlay (Pillow-rendered — no fontconfig dependency), **full audio graph: voice bus from shot audio (silent segments fill gaps, acrossfade under xfade), music bus with gain/delay, sidechaincompress ducking keyed by the voice bus**, silent bed fallback, H.264 CRF 18 yuv420p +faststart *(segment-then-concat optimisation when timelines get long)*
-- [ ] Progress reporting via `-progress` parse into the metrics table *(the metrics table + per-stage durations landed — all worker stages record; live in-render progress parsing still open)*
+- [x] Progress reporting via `-progress` parse into the metrics table *(`worker_cpu/ffmpeg/progress.py` streams `-progress pipe:1` blocks; the export stage records throttled snapshots + expected total as metric rows; `GET /metrics/exports/{ref}` serves pct/done for polling and the storyboard panel shows a live render bar)*
 - [x] **Compliance hook: the watermark decision lives INSIDE the compiler with no off-switch — any `origin='generated'` shot forces the C1 overlay (full duration, bottom-right) and compiling generated content without the overlay raises. Frame-sampling test proves watermark pixels at 10/50/90% of real rendered output**
 - [x] `export_stage` renders for real: fetch shots from the store → compile → ffmpeg (system binary or imageio-ffmpeg static) → upload → the export lands as an asset in the library and the project pool
 

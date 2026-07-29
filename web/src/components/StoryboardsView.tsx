@@ -13,6 +13,53 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-900/60 text-red-300",
 };
 
+interface ExportProgressInfo {
+  total_ms: number;
+  rendered_ms: number;
+  pct: number;
+  done: boolean;
+}
+
+/** Polls the export stage's -progress metrics while a render is in flight. */
+function ExportProgress({ refId }: { refId: string }) {
+  const [progress, setProgress] = useState<ExportProgressInfo | null>(null);
+
+  useEffect(() => {
+    setProgress(null);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const poll = () =>
+      fetch(`/metrics/exports/${refId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: ExportProgressInfo | null) => {
+          setProgress(data);
+          if (data?.done && timer) clearInterval(timer);
+        })
+        .catch(() => undefined);
+    poll();
+    timer = setInterval(poll, 2000);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [refId]);
+
+  if (!progress) return null;
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
+        <div
+          className={`h-full rounded-full transition-all ${progress.done ? "bg-emerald-500" : "bg-amber-400"}`}
+          style={{ width: `${progress.pct}%` }}
+        />
+      </div>
+      <span className="w-32 text-right text-xs text-zinc-400">
+        {progress.done
+          ? "render complete"
+          : `rendering ${progress.pct.toFixed(0)}% · ${(progress.rendered_ms / 1000).toFixed(1)}s / ${(progress.total_ms / 1000).toFixed(1)}s`}
+      </span>
+    </div>
+  );
+}
+
 export default function StoryboardsView({
   projectId,
   onOpenEditor,
@@ -208,6 +255,7 @@ export default function StoryboardsView({
               </div>
             </div>
             {error && <p className="text-sm text-red-400">{error}</p>}
+            <ExportProgress refId={board.id!} />
 
             <div className="space-y-2">
               {(board.shots ?? []).map((shot) => (

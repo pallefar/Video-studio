@@ -27,6 +27,18 @@ def watermark_required(timeline: dict) -> bool:
     return any(shot.get("origin") == "generated" for shot in timeline["shots"])
 
 
+def expected_duration_ms(timeline: dict) -> int:
+    """Output duration of the compiled render: shot durations minus the
+    overlap consumed by each xfade transition. The progress reporter measures
+    rendered ms against this."""
+    shots = timeline["shots"]
+    total = sum(shot["duration_ms"] for shot in shots)
+    transition_ms = timeline.get("transition_ms", 0)
+    if transition_ms > 0 and len(shots) > 1:
+        total -= transition_ms * (len(shots) - 1)
+    return total
+
+
 def build_ffmpeg_args(
     timeline: dict,
     shot_paths: list[str],
