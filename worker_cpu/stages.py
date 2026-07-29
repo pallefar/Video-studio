@@ -18,7 +18,19 @@ log = structlog.get_logger()
 
 @timed_stage("assemble")
 def assemble_stage(job_id: str) -> None:
-    from worker_cpu.ffmpeg.assemble import assemble
+    """M4: voice bus + loudnorm + chunk concat + b-roll + captions + C1
+    watermark + encode. Progress streams into the metrics table like the
+    M16 exports; the assembled uri lands on the job for the M7 preview."""
+    from sqlmodel import select
+
+    from pipeline_core.resolver import resolve_asset
+    from worker_cpu.ffmpeg.assemble import BROLL_MAX_MS, assemble
+    from schema.models import Segment, utcnow
+
+    binary = _find_ffmpeg()
+    if binary is None:
+        log.warning("assemble_waiting_for_ffmpeg", job_id=job_id)
+        return
 
     with open_session() as session:
         job = session.get(RenderJob, uuid.UUID(job_id))
@@ -27,15 +39,50 @@ def assemble_stage(job_id: str) -> None:
         if job.status != JobStatus.assemble:
             log.info("assemble_skip_idempotent", job_id=job_id, status=job.status.value)
             return
+
+        rows = session.exec(
+            select(Segment).where(Segment.job_id == job.id).order_by(Segment.idx)
+        ).all()
+        segments = [
+            {
+                "idx": s.idx, "text": s.text, "audio_uri": s.audio_uri,
+                "duration_ms": s.duration_ms, "pause_after_ms": s.pause_after_ms,
+            }
+            for s in rows
+        ]
+
+        # B-roll beats: one cutaway per resolvable segment, inserted at the
+        # segment's start; the resolver never returns flagged/unapproved assets.
+        broll = []
+        embedder = get_embedder()
+        clock_ms = 0
+        for segment in segments:
+            duration_ms = segment["duration_ms"] or 0
+            asset = resolve_asset(session, segment["text"], embedder)
+            if asset is not None and asset.duration_ms:
+                span = min(BROLL_MAX_MS, duration_ms, asset.duration_ms)
+                if span > 0:
+                    broll.append(
+                        {"uri": asset.uri, "start_ms": clock_ms, "end_ms": clock_ms + span}
+                    )
+            clock_ms += duration_ms + segment["pause_after_ms"]
+
+        total_ms = clock_ms
+        recorder = _ProgressRecorder(job_id, total_ms)
+        recorder.start()
         try:
-            assemble(ObjectStore(), job_id)
-        except NotImplementedError:
-            # M4 lands the ffmpeg chain; until then the job waits in assemble.
-            log.info("assemble_pending_m4", job_id=job_id)
-            return
+            uri = assemble(
+                ObjectStore(), job_id, segments, broll=broll,
+                ffmpeg_bin=binary, on_progress=recorder,
+            )
         except Exception as exc:
             fail_job(session, job, f"assemble: {exc}")
             raise
+        recorder.finish()
+        job.output_uri = uri
+        job.updated_at = utcnow()
+        session.add(job)
+        session.commit()
         advance_job(session, job, JobStatus.review)
 
 

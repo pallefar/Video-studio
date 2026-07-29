@@ -50,20 +50,20 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 
 ## M4 — Assembly
 
-- [ ] Loudness normalise to −14 LUFS
-- [ ] Watermark burn-in, full duration, bottom-right
-- [ ] Caption burn-in from faster-whisper word timings
-- [ ] B-roll insertion at timestamps
-- [ ] H.264 CRF 18, yuv420p, `+faststart`
+- [x] Loudness normalise to −14 LUFS *(two-pass loudnorm: measure JSON → linear apply; output verified at −14 ±1.5 in the encode test)*
+- [x] Watermark burn-in, full duration, bottom-right *(Pillow PNG overlay applied LAST in the graph, no enable= window — C1 has no off-switch: avatar output is always synthetic)*
+- [x] Caption burn-in from faster-whisper word timings *(word timings via faster-whisper when installed; deterministic even-split over real TTS durations until then; burned as fontconfig-free PNG overlays)*
+- [x] B-roll insertion at timestamps *(resolver-driven cutaways at segment beats, ≤4 s, voice bus continues; flagged/unapproved assets never selected)*
+- [x] H.264 CRF 18, yuv420p, `+faststart` *(AAC 192k; C3 encode-chain probe: near-ultrasonic content survives loudnorm+AAC round-trip)*
 
-**Accept:** an 8-minute job completes end to end; output plays in VLC and Chrome with correct A/V sync
+**Accept:** an 8-minute job completes end to end; output plays in VLC and Chrome with correct A/V sync *(chain proven end-to-end on synthetic chunks in `tests/test_assemble.py` ✅ 2026-07-29; the 8-minute real-model run is the workstation acceptance)*
 
 ## M5 — Compliance gate
 
 - [ ] Validator rejects any job with `watermark.persistent != true` *(schema-level validator + gate + tests landed with M1; frame-sampling pending)*
 - [ ] Validator rejects any job with `publish.altered_content != true` *(schema-level validator + gate + tests landed with M1)*
 - [ ] Provenance record written before publish is permitted *(publish route enforces this since M1)*
-- [ ] Frame sampling asserts watermark pixels present at 10%, 50%, 90% of duration
+- [x] Frame sampling asserts watermark pixels present at 10%, 50%, 90% of duration *(on real assembled output — `tests/test_assemble.py::test_c1_watermark_frame_sampling`; M16 studio renders had it already)*
 
 **Accept:** `pytest tests/test_compliance.py` passes, including the negative cases
 
@@ -80,7 +80,7 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 
 - [x] Submit script, pick loop + voice profile *(Avatar tab: script form with voice/loop pickers + inline creation)*
 - [x] Job list with live status *(2 s polling; plain fetch — TanStack Query optional later)*
-- [ ] Preview before publish, per-segment re-render button *(re-render button with emotion picker shipped; the video preview itself needs M4's assembled output)*
+- [x] Preview before publish, per-segment re-render button *(video player over the presigned M4 output via `GET /jobs/{id}/preview`; re-render button with emotion picker)*
 - [x] Manual publish confirmation — never automatic *(review-gated Publish button asks who reviewed; C5 message states the upload lands private)*
 
 **Accept:** a full video produced without touching the terminal

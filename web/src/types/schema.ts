@@ -95,6 +95,7 @@ export interface RenderJobRead {
   watermark: WatermarkConfig;
   publish: PublishConfig;
   error?: string | null;
+  output_uri?: string | null;
   created_at: string;
   updated_at: string;
   segments?: SegmentRead[];

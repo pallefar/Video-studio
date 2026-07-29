@@ -144,7 +144,9 @@ def test_rerun_is_idempotent(pipeline):
     assert _job_status(engine, job_id) == JobStatus.assemble
 
 
-def test_assemble_stage_waits_for_m4(pipeline):
+def test_assemble_stage_fails_cleanly_without_artefacts(pipeline):
+    """M4 is real now: assemble with no lipsync chunks in the store fails the
+    job (failed -> queued keeps it retryable) instead of hanging."""
     redis, engine, job_id = pipeline["redis"], pipeline["engine"], pipeline["job_id"]
 
     Dispatcher().enqueue(
@@ -153,8 +155,10 @@ def test_assemble_stage_waits_for_m4(pipeline):
     _drain_gpu_queue(redis)
     SimpleWorker([Queue(QUEUE_CPU, connection=redis)], connection=redis).work(burst=True)
 
-    # ffmpeg chain is M4 — the job waits in assemble instead of failing
-    assert _job_status(engine, job_id) == JobStatus.assemble
+    with Session(engine) as session:
+        job = session.get(RenderJob, job_id)
+        assert job.status == JobStatus.failed
+        assert "assemble" in (job.error or "")
 
 
 def test_engine_failure_marks_job_failed_and_retry_reenters(pipeline):

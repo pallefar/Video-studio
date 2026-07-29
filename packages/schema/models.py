@@ -238,6 +238,8 @@ class RenderJob(RenderJobBase, table=True):
         sa_column=Column(PydanticJSON(PublishConfig), nullable=False),
     )
     error: Optional[str] = None
+    # Assembled render (M4): set when assemble completes; feeds the M7 preview.
+    output_uri: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -278,6 +280,7 @@ class RenderJobRead(RenderJobBase):
     watermark: WatermarkConfig
     publish: PublishConfig
     error: Optional[str] = None
+    output_uri: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     segments: list[SegmentRead] = []

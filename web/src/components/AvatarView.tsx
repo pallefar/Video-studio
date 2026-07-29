@@ -24,6 +24,30 @@ interface EmotionPreset {
   cfg_weight: number;
 }
 
+/** Preview-before-publish (M7): plays the M4-assembled render. */
+function PreviewPlayer({ jobId, outputUri }: { jobId: string; outputUri: string | null }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUrl(null);
+    if (!outputUri) return;
+    fetch(`/jobs/${jobId}/preview`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { url: string } | null) => setUrl(data?.url ?? null))
+      .catch(() => undefined);
+  }, [jobId, outputUri]);
+
+  if (!outputUri) return null;
+  if (!url) return <p className="text-xs text-zinc-600">Loading preview…</p>;
+  return (
+    <video
+      controls
+      src={url}
+      className="w-full rounded-xl border border-zinc-800 bg-black"
+    />
+  );
+}
+
 export default function AvatarView() {
   const [jobs, setJobs] = useState<RenderJobRead[]>([]);
   const [voices, setVoices] = useState<VoiceProfileRead[]>([]);
@@ -259,6 +283,8 @@ export default function AvatarView() {
                 </button>
               </div>
             </div>
+
+            <PreviewPlayer jobId={selected.id!} outputUri={selected.output_uri ?? null} />
 
             <div className="overflow-x-auto rounded-xl border border-zinc-800">
               <table className="w-full text-left text-sm">

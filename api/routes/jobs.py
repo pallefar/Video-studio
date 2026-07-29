@@ -128,6 +128,27 @@ async def transition_job(
     return _read_model(session, job)
 
 
+def _get_object_store():
+    from api.routes.assets import get_object_store
+
+    return get_object_store()
+
+
+@router.get("/{job_id}/preview")
+async def preview_job(
+    job_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    store=Depends(_get_object_store),
+):
+    """Presigned URL for the assembled render (M7 preview-before-publish).
+    Available once M4's assemble stage has produced final.mp4."""
+    job = _get_or_404(session, job_id)
+    if not job.output_uri:
+        raise HTTPException(status_code=404, detail="no assembled output yet")
+    _, key = store.parse_uri(job.output_uri)
+    return {"url": store.presign_get(key), "uri": job.output_uri}
+
+
 class SegmentRerenderRequest(BaseModel):
     """Re-render one segment (the retry unit). The pinned seed is kept unless
     reseed asks for a fresh take; emotion (M18) changes delivery only when
