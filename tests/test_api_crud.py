@@ -69,7 +69,34 @@ def test_job_create_defaults_are_compliant(client, voice, loop):
     assert job["watermark"]["position"] == "bottom_right"
     assert job["publish"]["altered_content"] is True
     assert job["publish"]["visibility"] == "private"
-    assert job["segments"] == []
+
+
+def test_job_create_splits_script_into_seeded_segments(client, voice, loop):
+    job = client.post("/jobs", json=make_job_payload(voice, loop)).json()
+    segments = job["segments"]
+    assert [s["text"] for s in segments] == ["First sentence.", "Second sentence."]
+    assert [s["idx"] for s in segments] == [0, 1]
+    assert all(s["seed"] is not None for s in segments)
+    assert all(s["audio_uri"] is None for s in segments)
+
+
+def test_job_create_enqueues_render(client, voice, loop, dispatcher):
+    job = client.post("/jobs", json=make_job_payload(voice, loop)).json()
+    assert len(dispatcher.calls) == 1
+    queue_name, func_path, args, job_key = dispatcher.calls[0]
+    assert queue_name == "gpu"
+    assert func_path == "worker_gpu.stages.tts_stage"
+    assert args == (job["id"],)
+    assert job_key == f"{job['id']}-tts"
+
+
+def test_retry_transition_reenqueues(client, voice, loop, dispatcher):
+    job_id = client.post("/jobs", json=make_job_payload(voice, loop)).json()["id"]
+    client.post(f"/jobs/{job_id}/transition", json={"status": "tts"})
+    client.post(f"/jobs/{job_id}/transition", json={"status": "failed", "error": "boom"})
+    dispatcher.calls.clear()
+    assert client.post(f"/jobs/{job_id}/transition", json={"status": "queued"}).status_code == 200
+    assert [c[0] for c in dispatcher.calls] == ["gpu"]
 
 
 def test_job_create_requires_existing_references(client, voice, loop):

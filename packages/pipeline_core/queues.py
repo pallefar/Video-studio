@@ -20,10 +20,11 @@ GPU_WORKER_CONCURRENCY = 1
 
 
 def stage_key(job_id: uuid.UUID | str, stage: str, segment_idx: Optional[int] = None) -> str:
-    """Idempotency key for a pipeline stage.
+    """Idempotency key for a pipeline stage. Doubles as the RQ job id, which
+    only permits letters, numbers, underscores and dashes.
 
     Every stage is idempotent on (job_id, stage); segment-level TTS refines
-    the stage to tts:{idx} so one bad sentence re-renders alone.
+    the stage to tts-{idx} so one bad sentence re-renders alone.
     """
-    suffix = f"{stage}:{segment_idx}" if segment_idx is not None else stage
-    return f"{job_id}:{suffix}"
+    suffix = f"{stage}-{segment_idx}" if segment_idx is not None else stage
+    return f"{job_id}-{suffix}"

@@ -35,11 +35,16 @@ see docs/psd.md §5 for full rationale.
 
 ## M3 — GPU worker
 
-- [ ] Single long-lived process, models warm at boot, never unloaded
-- [ ] Consumes `tts` and `lipsync` stages from Redis
-- [ ] Segment-level retry — one bad sentence re-renders alone
-- [ ] Chunked lip-sync at 60–90 s windows
-- [ ] Seeds pinned and persisted per segment
+*Orchestration skeleton landed ahead of time (CPU-verifiable, tested against real
+Redis + RQ with fake engines in `tests/test_pipeline_flow.py`). What remains for
+M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads in
+`worker_gpu/engines/`, warmed at boot from `run.py`.*
+
+- [ ] Single long-lived process, models warm at boot, never unloaded *(engine cache + boot hook stubbed; real loads pending)*
+- [x] Consumes `tts` and `lipsync` stages from Redis *(stage chain `tts → lipsync → assemble` runs unattended; e2e-tested)*
+- [x] Segment-level retry — one bad sentence re-renders alone *(tts skips segments with audio; failed → queued re-enters; e2e-tested)*
+- [ ] Chunked lip-sync at 60–90 s windows *(window derivation + orchestration done in `pipeline_core/chunking.py`; real MuseTalk chunk rendering pending)*
+- [x] Seeds pinned and persisted per segment *(generated at ingest, passed to the engine, immutable through retries)*
 
 **Accept:** `pytest tests/test_queue_topology.py` asserts GPU concurrency is 1; a job goes `queued → lipsync` unattended
 
@@ -93,7 +98,7 @@ see docs/psd.md §5 for full rationale.
 ## M9 — Generative B-roll lane
 
 - [ ] Wan 2.2 quantised (GGUF/INT8) loads and generates a 5 s clip
-- [ ] Runs as a separate queue with an exclusive GPU lock — never concurrent with the render lane
+- [ ] Runs as a separate queue with an exclusive GPU lock — never concurrent with the render lane *(the lock itself landed early in `pipeline_core/locks.py`, proven by `tests/test_gpu_exclusivity.py` against real Redis)*
 - [ ] Generation requests enqueue and never block a render job
 - [ ] Output lands in the library as `origin='generated'`, `approved=false`
 - [ ] Approval gate in the control panel before an asset becomes selectable

@@ -1,16 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from functools import lru_cache
 
-from sqlmodel import Session, create_engine
+from sqlmodel import Session
 
-from pipeline_core.settings import Settings
-
-
-@lru_cache(maxsize=1)
-def get_engine():
-    return create_engine(Settings().database_url)
+from pipeline_core.db import get_engine
 
 
 def get_session() -> Iterator[Session]:

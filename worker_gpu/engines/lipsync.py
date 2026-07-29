@@ -21,7 +21,9 @@ class MuseTalkEngine:
             raise RuntimeError("MuseTalkEngine requires a CUDA device — run scripts/verify_gpu.py first")
         raise NotImplementedError("M3: load MuseTalk weights (pinned version) in BF16")
 
-    def sync_chunk(self, job_id: str, loop_id: str, audio_uri: str, chunk_start_ms: int, chunk_end_ms: int) -> str:
+    def sync_chunk(self, job_id: str, loop_id: str, chunk_start_ms: int, chunk_end_ms: int) -> str:
         """Lip-sync one 60-90 s window against the cached loop latents,
-        upload via ObjectStore, return the s3 uri. Idempotent per chunk."""
+        upload via ObjectStore, return the s3 uri. Idempotent per chunk:
+        chunk windows derive deterministically from segment durations, and a
+        chunk whose key already exists in the store is skipped."""
         raise NotImplementedError("M3")

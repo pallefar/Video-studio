@@ -21,8 +21,9 @@ class ChatterboxEngine:
             raise RuntimeError("ChatterboxEngine requires a CUDA device — run scripts/verify_gpu.py first")
         raise NotImplementedError("M3: load Chatterbox weights (pinned version) in BF16")
 
-    def synthesize_segment(self, job_id: str, segment_idx: int, text: str, seed: int) -> str:
-        """Render one segment to audio, upload via ObjectStore, return the s3 uri.
+    def synthesize_segment(self, job_id: str, segment_idx: int, text: str, seed: int) -> tuple[str, int]:
+        """Render one segment to audio, upload via ObjectStore, and return
+        (s3 uri, duration in ms).
 
         Idempotent on stage_key(job_id, "tts", segment_idx); the seed is pinned
         and persisted so a retry reproduces the same take.

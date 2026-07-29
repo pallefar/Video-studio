@@ -9,7 +9,18 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from api.db import get_session
 from api.main import create_app
+from api.routes.jobs import get_dispatcher
 from schema.models import BaseLoop, VoiceProfile
+
+
+class RecordingDispatcher:
+    """Captures enqueues instead of touching Redis — for API unit tests."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, str, tuple, str | None]] = []
+
+    def enqueue(self, queue_name, func_path, *args, job_key=None):
+        self.calls.append((queue_name, func_path, args, job_key))
 
 
 @pytest.fixture()
@@ -31,7 +42,12 @@ def session(engine):
 
 
 @pytest.fixture()
-def client(engine):
+def dispatcher():
+    return RecordingDispatcher()
+
+
+@pytest.fixture()
+def client(engine, dispatcher):
     app = create_app()
 
     def override_session():
@@ -39,8 +55,42 @@ def client(engine):
             yield session
 
     app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_dispatcher] = lambda: dispatcher
     with TestClient(app) as client:
         yield client
+
+
+@pytest.fixture(scope="session")
+def redis_url(tmp_path_factory):
+    """A real redis-server on a unix socket, shared across the session."""
+    import shutil
+    import subprocess
+    import time
+
+    if shutil.which("redis-server") is None:
+        pytest.skip("redis-server not available")
+    sock = tmp_path_factory.mktemp("redis") / "redis.sock"
+    proc = subprocess.Popen(
+        [
+            "redis-server",
+            "--port", "0",
+            "--unixsocket", str(sock),
+            "--save", "",
+            "--appendonly", "no",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    for _ in range(200):
+        if sock.exists():
+            break
+        time.sleep(0.05)
+    else:
+        proc.kill()
+        pytest.fail("redis-server did not start")
+    yield f"unix://{sock}"
+    proc.terminate()
+    proc.wait(timeout=5)
 
 
 @pytest.fixture()

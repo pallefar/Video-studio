@@ -42,6 +42,6 @@ def test_cpu_worker_consumes_only_the_cpu_lane():
 def test_stage_keys_are_idempotent_and_segment_scoped():
     job_id = "8f7c9c2e-6a1b-4f0e-9a3d-2b5f8d1c4e77"
     assert stage_key(job_id, "lipsync") == stage_key(job_id, "lipsync")
-    assert stage_key(job_id, "tts", 3) == f"{job_id}:tts:3"
+    assert stage_key(job_id, "tts", 3) == f"{job_id}-tts-3"
     assert stage_key(job_id, "tts", 3) != stage_key(job_id, "tts", 4)
     assert stage_key(job_id, "tts") != stage_key(job_id, "lipsync")
