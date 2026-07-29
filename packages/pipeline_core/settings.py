@@ -28,3 +28,10 @@ class Settings(BaseSettings):
 
     # Generation providers (M10): same rule — no key, not registered.
     fal_api_key: str = ""
+
+    # YouTube publish (M6): OAuth refresh-token flow. Unconfigured -> the
+    # publish stage waits instead of failing, like a missing ffmpeg.
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
+    youtube_refresh_token: str = ""
+    youtube_token_uri: str = "https://oauth2.googleapis.com/token"

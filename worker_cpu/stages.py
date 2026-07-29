@@ -302,6 +302,90 @@ def ingest_stage(asset_id: str) -> dict | None:
     return info
 
 
+# Cached like the engines: one client per worker process. Tests inject fakes.
+_youtube_client = None
+
+
+def get_youtube_client():
+    global _youtube_client
+    if _youtube_client is None:
+        from worker_cpu.publish import build_client
+
+        _youtube_client = build_client()
+    return _youtube_client
+
+
+@timed_stage("publish")
+def publish_stage(job_id: str) -> None:
+    """M6: upload the assembled render. Private always (C5), synthetic-media
+    disclosure always (C2), provenance record required (C4). Quota exhaustion
+    leaves the job in publishing for the next window; real failures retry
+    with exponential backoff, then fail the job."""
+    import tempfile
+    import time
+    from pathlib import Path
+
+    from sqlmodel import select
+
+    from worker_cpu.publish import BACKOFF_BASE_S, UPLOAD_MAX_ATTEMPTS, QuotaExceededError
+    from schema.models import JobStatus as JS, PublishRecord, utcnow
+
+    client = get_youtube_client()
+    if client is None:
+        log.warning("publish_waiting_for_oauth", job_id=job_id)
+        return
+
+    with open_session() as session:
+        job = session.get(RenderJob, uuid.UUID(job_id))
+        if job is None:
+            raise ValueError(f"job {job_id} not found")
+        if job.status != JS.publishing:
+            log.info("publish_skip_idempotent", job_id=job_id, status=job.status.value)
+            return
+        record = session.exec(
+            select(PublishRecord).where(PublishRecord.job_id == job.id)
+        ).first()
+        if record is None:  # C4: no provenance record, no upload — ever
+            fail_job(session, job, "publish: no provenance record (C4)")
+            raise ValueError(f"job {job_id}: publish without provenance record")
+        if record.youtube_id:
+            log.info("publish_skip_already_uploaded", job_id=job_id, youtube_id=record.youtube_id)
+            return
+        if not job.output_uri:
+            fail_job(session, job, "publish: no assembled output to upload")
+            raise ValueError(f"job {job_id}: nothing assembled")
+
+        store = ObjectStore()
+        _, key = store.parse_uri(job.output_uri)
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / "final.mp4"
+            store.get_file(key, local)
+
+            description = "Synthetic media — created with an AI avatar pipeline."
+            last_error: Exception | None = None
+            for attempt in range(UPLOAD_MAX_ATTEMPTS):
+                try:
+                    result = client.upload(local, job.title, description)
+                    break
+                except QuotaExceededError:
+                    # next quota window, not a failure — leave in publishing
+                    log.warning("publish_quota_exhausted", job_id=job_id)
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    log.warning("publish_retry", job_id=job_id, attempt=attempt, error=str(exc))
+                    time.sleep(BACKOFF_BASE_S * (2**attempt))
+            else:
+                fail_job(session, job, f"publish: {last_error}")
+                raise RuntimeError(f"publish failed for {job_id}: {last_error}")
+
+        record.youtube_id = result.video_id
+        record.published_at = utcnow()
+        session.add(record)
+        advance_job(session, job, JS.published)
+        log.info("publish_done", job_id=job_id, youtube_id=result.video_id)
+
+
 @timed_stage("generation")
 def generation_stage_api(generation_id: str) -> None:
     """API-provider generation: a network job. Deliberately no GPU lock —

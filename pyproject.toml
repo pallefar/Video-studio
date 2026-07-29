@@ -32,6 +32,12 @@ dev = [
     # static ffmpeg binary so render tests run without a system install
     "imageio-ffmpeg>=0.5",
 ]
+# YouTube publish (M6): installed where uploads actually run.
+publish = [
+    "google-api-python-client>=2.100",
+    "google-auth>=2.20",
+    "google-auth-oauthlib>=1.0",
+]
 # Real sentence embeddings for the asset resolver (CPU); without it the
 # deterministic hashing embedder is used.
 embed = [

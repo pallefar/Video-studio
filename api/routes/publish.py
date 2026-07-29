@@ -6,8 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from api.db import get_session
-from api.routes.jobs import _get_or_404
+from api.routes.jobs import _get_or_404, get_dispatcher
 from api.validators.compliance import ComplianceError, check_publishable
+from pipeline_core.dispatch import Dispatcher
+from pipeline_core.queues import QUEUE_CPU, stage_key
 from schema.models import (
     JobStatus,
     PublishRecord,
@@ -21,7 +23,10 @@ router = APIRouter(tags=["publish"])
 
 @router.post("/jobs/{job_id}/publish", response_model=PublishRecordRead, status_code=201)
 async def publish_job(
-    job_id: uuid.UUID, body: PublishRecordCreate, session: Session = Depends(get_session)
+    job_id: uuid.UUID,
+    body: PublishRecordCreate,
+    session: Session = Depends(get_session),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
 ):
     """Move a reviewed job to publishing. C4: the provenance record is created
     in the same transaction that changes the status — publish cannot happen
@@ -50,6 +55,10 @@ async def publish_job(
     session.add(job)
     session.commit()
     session.refresh(record)
+    dispatcher.enqueue(
+        QUEUE_CPU, "worker_cpu.stages.publish_stage", str(job.id),
+        job_key=stage_key(job.id, "publish"),
+    )
     return record
 
 

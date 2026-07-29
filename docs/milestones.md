@@ -69,12 +69,12 @@ M3 proper is the model integration on the 3090: real Chatterbox/MuseTalk loads i
 
 ## M6 — Publish
 
-- [ ] YouTube Data API v3, OAuth, refresh token persisted
-- [ ] Uploads land `private`, always — no path publishes directly
-- [ ] `altered_content` set programmatically on upload
-- [ ] Exponential backoff; quota exhaustion is distinguished from real failure
+- [x] YouTube Data API v3, OAuth, refresh token persisted *(refresh-token flow in `worker_cpu/publish.py`; creds from env via Settings; unconfigured → the stage waits, `pip install -e ".[publish]"` on the box that uploads)*
+- [x] Uploads land `private`, always — no path publishes directly *(privacyStatus is bound to a constant, never a parameter; asserted structurally in `tests/test_publish_worker.py`)*
+- [x] `altered_content` set programmatically on upload *(`containsSyntheticMedia: true` on every insert)*
+- [x] Exponential backoff; quota exhaustion is distinguished from real failure *(quota → job parks in `publishing` for the next window, no hammering; transient errors retry ×4 then fail retryably; C4 re-checked in the worker)*
 
-**Accept:** a real upload lands private with the disclosure flag visible in Studio
+**Accept:** a real upload lands private with the disclosure flag visible in Studio *(worker proven against a fake client ✅ 2026-07-29; the real-credential upload is the workstation acceptance)*
 
 ## M7 — Control panel
 
