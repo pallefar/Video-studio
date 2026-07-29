@@ -204,3 +204,19 @@ full-length + Shorts formats, export path. Full design: docs/roadmap-v2.md §4.
 - [x] Storyboards tab in the panel: board list + create (title/format/style), shot rows with status chips, per-shot generate/regenerate, export button gated on readiness
 
 **Accept:** `pytest tests/test_storyboards.py` — style+format flow into generation params, shorts duration cap enforced at generation and export, export refuses unfinished boards, ordered timeline compiled ✅ (2026-07-29)
+
+## M20 — Projects: asset center → video center
+
+Owner requirement (2026-07-29): a project per video-effort — build the asset pool
+first (asset creation center), assemble videos from it after (video creation
+center). Assets are shared: one asset serves any number of projects and stands
+alone for social posting.
+
+- [x] `Project` entity + `ProjectAsset` many-to-many link (alembic 0004); storyboards and generations carry an optional `project_id`
+- [x] Generations scoped to a project auto-link their output asset into the project pool on success
+- [x] Attach/detach any library asset to any project — detaching never removes it from the library or other projects
+- [x] Shots can use a pooled asset directly (`asset_id` on shot creation) — no generation needed; export works from pooled assets alone
+- [x] `GET /assets/{id}/download` — presigned URL for social posting / external tools
+- [x] Panel: Projects home tab — project switcher, then "1 · Asset center" (preset generation scoped to the project + pool/library attach-detach-download) and "2 · Video center" (the project's storyboards)
+
+**Accept:** `pytest tests/test_projects.py` — cross-project asset sharing, auto-link on generation success, pooled-asset shots exporting, presigned downloads ✅ (2026-07-29)

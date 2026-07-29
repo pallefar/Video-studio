@@ -148,6 +148,7 @@ export interface GenerationCreate {
   prompt: string;
   params?: Record<string, unknown> | null;
   fallback?: GenerationTarget[];
+  project_id?: string | null;
 }
 
 export interface GenerationRead {
@@ -163,6 +164,7 @@ export interface GenerationRead {
   cost?: number | null;
   error?: string | null;
   asset_id?: string | null;
+  project_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -199,6 +201,7 @@ export interface ShotCreate {
   preset_ids?: string[];
   duration_target_ms?: number;
   notes?: string | null;
+  asset_id?: string | null;
 }
 
 export interface ShotRead {
@@ -218,14 +221,31 @@ export interface StoryboardCreate {
   title: string;
   format?: VideoFormat;
   style_id?: string | null;
+  project_id?: string | null;
 }
 
 export interface StoryboardRead {
   title: string;
   format?: VideoFormat;
   style_id?: string | null;
+  project_id?: string | null;
   id: string;
   created_at: string;
   updated_at: string;
   shots?: ShotRead[];
+}
+
+export interface ProjectCreate {
+  title: string;
+  description?: string | null;
+}
+
+export interface ProjectRead {
+  title: string;
+  description?: string | null;
+  id: string;
+  created_at: string;
+  updated_at: string;
+  asset_count?: number;
+  storyboard_count?: number;
 }

@@ -22,6 +22,8 @@ EXPECTED_TABLES = {
     "generations",
     "storyboards",
     "shots",
+    "projects",
+    "project_assets",
 }
 
 

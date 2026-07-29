@@ -13,7 +13,7 @@ const STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-900/60 text-red-300",
 };
 
-export default function StoryboardsView() {
+export default function StoryboardsView({ projectId }: { projectId?: string }) {
   const [boards, setBoards] = useState<StoryboardRead[]>([]);
   const [styles, setStyles] = useState<StyleTemplateRead[]>([]);
   const [presets, setPresets] = useState<CameraPresetRead[]>([]);
@@ -29,13 +29,14 @@ export default function StoryboardsView() {
   const [shotDuration, setShotDuration] = useState(5);
 
   const refresh = useCallback(() => {
-    fetch("/storyboards")
+    const query = projectId ? `?project_id=${projectId}` : "";
+    fetch(`/storyboards${query}`)
       .then((r) => r.json())
       .then((data: StoryboardRead[]) => {
         setBoards(data);
         setSelectedId((current) => current ?? data[data.length - 1]?.id ?? null);
       });
-  }, []);
+  }, [projectId]);
 
   useEffect(() => {
     fetch("/styles").then((r) => r.json()).then(setStyles);
@@ -59,7 +60,12 @@ export default function StoryboardsView() {
     api("/storyboards", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, format, style_id: styleId || null }),
+      body: JSON.stringify({
+        title,
+        format,
+        style_id: styleId || null,
+        project_id: projectId ?? null,
+      }),
     })
       .then(async (r) => setSelectedId((await r.json()).id))
       .then(() => setTitle(""))

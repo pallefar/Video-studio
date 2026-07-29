@@ -8,6 +8,7 @@ from api.routes import (
     jobs,
     loops,
     presets,
+    projects,
     publish,
     storyboards,
     voices,
@@ -22,6 +23,7 @@ def create_app() -> FastAPI:
     app.include_router(assets.router)
     app.include_router(generations.router)
     app.include_router(presets.router)
+    app.include_router(projects.router)
     app.include_router(storyboards.router)
     app.include_router(publish.router)
 

@@ -68,6 +68,7 @@ async def create_generation(
         prompt=body.prompt,
         params=body.params,
         fallback=[target.model_dump() for target in body.fallback],
+        project_id=body.project_id,
     )
     session.add(generation)
     session.commit()

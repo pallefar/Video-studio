@@ -16,6 +16,7 @@ export default defineConfig({
       "/presets": "http://localhost:8000",
       "/storyboards": "http://localhost:8000",
       "/styles": "http://localhost:8000",
+      "/projects": "http://localhost:8000",
       "/healthz": "http://localhost:8000",
     },
   },

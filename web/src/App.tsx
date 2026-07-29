@@ -1,12 +1,13 @@
 import { useState } from "react";
 import CreateView from "./components/CreateView";
 import LibraryView from "./components/LibraryView";
+import ProjectsView from "./components/ProjectsView";
 import StoryboardsView from "./components/StoryboardsView";
 
-type Tab = "create" | "storyboards" | "library";
+type Tab = "projects" | "create" | "storyboards" | "library";
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("create");
+  const [tab, setTab] = useState<Tab>("projects");
 
   return (
     <div className="min-h-screen">
@@ -19,7 +20,7 @@ export default function App() {
             </span>
           </h1>
           <nav className="flex gap-1">
-            {(["create", "storyboards", "library"] as const).map((t) => (
+            {(["projects", "create", "storyboards", "library"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -36,6 +37,7 @@ export default function App() {
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
+        {tab === "projects" && <ProjectsView />}
         {tab === "create" && <CreateView />}
         {tab === "storyboards" && <StoryboardsView />}
         {tab === "library" && <LibraryView />}

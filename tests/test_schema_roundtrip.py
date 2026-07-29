@@ -19,6 +19,8 @@ from schema.models import (
     GenerationRead,
     GenerationTarget,
     LoraRef,
+    ProjectCreate,
+    ProjectRead,
     ShotCreate,
     ShotRead,
     StoryboardCreate,
@@ -143,6 +145,13 @@ SAMPLES = {
         "preset_ids": ["zoom_in"],
         "id": _UUID,
         "storyboard_id": _UUID,
+    },
+    ProjectCreate: {"title": "Q3 launch"},
+    ProjectRead: {
+        "title": "Q3 launch",
+        "id": _UUID,
+        "created_at": utcnow(),
+        "updated_at": utcnow(),
     },
     StoryboardCreate: {"title": "Launch video", "format": "short", "style_id": "y2k"},
     StoryboardRead: {
