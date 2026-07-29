@@ -77,11 +77,12 @@ def test_short_format_dimensions():
     assert "scale=1080:1920" in _graph(args)
 
 
-def test_silent_audio_track_always_mapped():
+def test_silent_bed_when_no_audio_sources():
     args = build_ffmpeg_args(_timeline(["own", "own"]), ["a", "b"], "o.mp4", None)
-    assert "anullsrc=channel_layout=stereo:sample_rate=48000" in args
+    graph = _graph(args)
+    assert "anullsrc=channel_layout=stereo:sample_rate=48000" in graph
     audio_map = args[args.index("-map", args.index("-map") + 2) + 1]
-    assert audio_map.endswith(":a")
+    assert audio_map == "[aout]"
 
 
 # --- C1: the watermark decision has no off-switch --------------------------

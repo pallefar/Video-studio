@@ -196,6 +196,16 @@ async def export_timeline(
             detail=f"{doc.format.value} format is capped at {spec['max_duration_s']}s",
         )
 
+    music = []
+    for track in doc.audio_tracks:
+        for clip in sorted(track, key=lambda c: c.start_ms):
+            asset = session.get(Asset, uuid.UUID(clip.asset_id))
+            if asset is None:
+                raise HTTPException(
+                    status_code=409, detail=f"audio clip {clip.id} references a missing asset"
+                )
+            music.append({**clip.model_dump(), "asset_uri": asset.uri})
+
     render_timeline = {
         "storyboard_id": str(timeline.storyboard_id) if timeline.storyboard_id else str(timeline.id),
         "timeline_id": str(timeline.id),
@@ -207,6 +217,7 @@ async def export_timeline(
         "style": None,
         "transition_ms": doc.transition_ms,
         "shots": shots,
+        "music": music,
         "texts": [text.model_dump() for text in sorted(doc.texts, key=lambda t: t.start_ms)],
     }
     dispatcher.enqueue(

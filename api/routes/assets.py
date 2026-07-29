@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -15,7 +15,7 @@ from pipeline_core.queues import QUEUE_CPU
 from pipeline_core.resolver import DEFAULT_THRESHOLD, resolve_asset
 from pipeline_core.stock import StockKind, StockResult, get_providers
 from pipeline_core.storage import ObjectStore
-from schema.models import Asset, AssetCreate, AssetRead
+from schema.models import Asset, AssetCreate, AssetOrigin, AssetRead
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
@@ -69,6 +69,39 @@ async def create_asset(body: AssetCreate, session: Session = Depends(get_session
 @router.get("", response_model=list[AssetRead])
 async def list_assets(session: Session = Depends(get_session)):
     return session.exec(select(Asset).order_by(Asset.created_at)).all()
+
+
+@router.post("/upload", response_model=AssetRead, status_code=201)
+async def upload_asset(
+    file: UploadFile,
+    caption: str | None = Form(default=None),
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+):
+    """Bring your own media — footage, music beds, images. Uploads are the
+    owner's material: origin='own', approved, no identifiable-people hold."""
+    import mimetypes
+    from pathlib import PurePosixPath
+
+    suffix = PurePosixPath(file.filename or "upload.bin").suffix or ".bin"
+    key = f"assets/uploads/{uuid.uuid4()}{suffix}"
+    content_type = file.content_type or mimetypes.guess_type(key)[0]
+    data = await file.read()
+    uri = store.put_bytes(key, data, content_type=content_type)
+
+    text = caption or (file.filename or "upload")
+    asset = Asset(
+        origin=AssetOrigin.own,
+        uri=uri,
+        caption=text,
+        has_identifiable_people=False,
+        approved=True,
+        embedding=get_embedder_dep().embed(text),
+    )
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+    return asset
 
 
 @router.get("/resolve", response_model=AssetRead)

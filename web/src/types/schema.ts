@@ -258,6 +258,16 @@ export interface TimelineClip {
   out_ms: number;
 }
 
+export interface AudioClip {
+  id: string;
+  asset_id: string;
+  start_ms: number;
+  in_ms?: number;
+  out_ms: number;
+  gain?: number;
+  duck?: boolean;
+}
+
 export interface TextClip {
   id: string;
   text: string;
@@ -270,6 +280,7 @@ export interface TimelineDocument {
   format?: VideoFormat;
   transition_ms?: number;
   video_tracks?: TimelineClip[][];
+  audio_tracks?: AudioClip[][];
   texts?: TextClip[];
 }
 

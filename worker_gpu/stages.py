@@ -15,6 +15,7 @@ from sqlmodel import select
 
 from pipeline_core.chunking import chunk_windows
 from pipeline_core.db import advance_job, fail_job, open_session
+from pipeline_core.metrics import timed_stage
 from pipeline_core.dispatch import Dispatcher, get_redis
 from pipeline_core.locks import HOLDER_RENDER, GpuLockHeld, gpu_lock
 from pipeline_core.queues import QUEUE_CPU, QUEUE_GPU, stage_key
@@ -58,6 +59,7 @@ def _segments(session, job_id: str) -> list[Segment]:
     )
 
 
+@timed_stage("tts")
 def tts_stage(job_id: str) -> None:
     with open_session() as session:
         job = _get_job(session, job_id)
@@ -92,6 +94,7 @@ def tts_stage(job_id: str) -> None:
     )
 
 
+@timed_stage("lipsync")
 def lipsync_stage(job_id: str) -> None:
     with open_session() as session:
         job = _get_job(session, job_id)
@@ -124,6 +127,7 @@ def lipsync_stage(job_id: str) -> None:
     )
 
 
+@timed_stage("generation")
 def generation_stage_local(generation_id: str) -> None:
     """Local (wan-lane) generation: exclusive GPU lock, never concurrent with
     the render lane."""
