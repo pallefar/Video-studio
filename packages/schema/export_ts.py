@@ -41,6 +41,10 @@ _PRIMITIVES: dict[type, str] = {
 def ts_type(annotation: object) -> str:
     if annotation is type(None):
         return "null"
+    if annotation is dict:
+        return "Record<string, unknown>"
+    if annotation is list:
+        return "unknown[]"
     if annotation in _PRIMITIVES:
         return _PRIMITIVES[annotation]  # type: ignore[index]
 

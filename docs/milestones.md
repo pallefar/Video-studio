@@ -116,14 +116,14 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M10 — Generation provider layer + wan-lane executor
 
-- [ ] `GenerationProvider` interface: capability discovery, submit, poll, fetch-to-MinIO; every output lands as an `Asset` (`origin='generated'`) with provider/model/params/cost provenance
-- [ ] Local provider: wan-lane executor (decide ComfyUI headless vs diffusers here) running Wan 2.2 T2V/I2V under the existing GPU lock
-- [ ] API provider class: aggregator gateway first (fal.ai or Replicate), then one direct integration (Sora or Veo); keys from env only — unconfigured providers don't appear in the registry
-- [ ] API jobs run as network jobs on the CPU lane with backoff — never touch the GPU lock
-- [ ] Fallback chains: a request may declare provider preference order
+- [x] `GenerationProvider` interface: capability discovery, submit, poll, fetch-to-MinIO; every output lands as an `Asset` (`origin='generated'`) with provider/model/params/cost provenance
+- [ ] Local provider: wan-lane executor (decide ComfyUI headless vs diffusers here) running Wan 2.2 T2V/I2V under the existing GPU lock *(lane routing + lock wrapper landed; the executor itself is the workstation decision)*
+- [x] API provider class: aggregator gateway first (fal.ai) — keys from env only, unconfigured providers don't appear in the registry *(direct Sora/Veo integrations still open)*
+- [x] API jobs run as network jobs on the CPU lane — never touch the GPU lock
+- [x] Fallback chains: a request may declare provider preference order *(cross-lane re-dispatch on failure)*
 - [ ] Benchmark on the 3090: Fun-Camera A14B GGUF + 4-step LoRA latency and VRAM (decides 14B vs 5B default)
 
-**Accept:** `pytest tests/test_providers.py` — a fake provider round-trips a generation into the asset library with full provenance; unknown models are refused; an API-provider job never acquires the GPU lock
+**Accept:** `pytest tests/test_providers.py` — a fake provider round-trips a generation into the asset library with full provenance; unknown models are refused; an API-provider job never acquires the GPU lock ✅ (2026-07-29)
 
 ## M11 — Camera presets (the signature)
 

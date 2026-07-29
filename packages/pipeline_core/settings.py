@@ -25,3 +25,6 @@ class Settings(BaseSettings):
     # Stock providers (M8): a provider with no key configured is not registered.
     pexels_api_key: str = ""
     pixabay_api_key: str = ""
+
+    # Generation providers (M10): same rule — no key, not registered.
+    fal_api_key: str = ""
