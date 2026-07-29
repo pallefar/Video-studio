@@ -21,3 +21,7 @@ class Settings(BaseSettings):
     s3_secret_key: str = "minioadmin"
     s3_bucket: str = "avatar-pipeline"
     s3_region: str = "us-east-1"
+
+    # Stock providers (M8): a provider with no key configured is not registered.
+    pexels_api_key: str = ""
+    pixabay_api_key: str = ""
