@@ -245,7 +245,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         <select
           value={current?.id ?? ""}
           onChange={(e) => e.target.value && load(e.target.value)}
-          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm"
         >
           <option value="">Open timeline…</option>
           {timelines.map((t) => (
@@ -257,16 +257,16 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         {current && (
           <>
             <button onClick={save} disabled={!dirty}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40">
+              className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40">
               Save{dirty ? " *" : ""}
             </button>
             <button onClick={exportTimeline}
-              className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-white">
+              className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200 hover:bg-white">
               Export
             </button>
             <button onClick={splitSelected} disabled={!selected}
-              className="rounded-lg bg-zinc-800 px-3 py-2 text-sm disabled:opacity-40">Split</button>
-            <button onClick={addText} className="rounded-lg bg-zinc-800 px-3 py-2 text-sm">+ Text</button>
+              className="rounded-lg bg-white/10 px-3 py-2 text-sm disabled:opacity-40">Split</button>
+            <button onClick={addText} className="rounded-lg bg-white/10 px-3 py-2 text-sm">+ Text</button>
             <button onClick={deleteSelected} disabled={!selected}
               className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300 disabled:opacity-40">Delete</button>
             <label className="ml-2 text-xs text-zinc-500">
@@ -283,7 +283,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         <>
           <div className="flex gap-4">
             <canvas ref={canvasRef} width={320} height={180}
-              className="rounded-lg border border-zinc-800 bg-zinc-950" />
+              className="rounded-lg border border-white/10 bg-black/40" />
             <div className="flex-1 text-xs text-zinc-500">
               <p className="mb-1 text-sm text-zinc-300">{current.title}</p>
               <p>{(totalMs / 1000).toFixed(1)}s · {track.length} clips · {texts.length} texts · v{current.version}</p>
@@ -297,19 +297,19 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                       if (t) t.text = e.target.value;
                     })
                   }
-                  className="mt-2 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200"
+                  className="mt-2 w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-sm text-zinc-200"
                 />
               )}
             </div>
           </div>
 
           <div
-            className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950 p-3 select-none"
+            className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.02] bg-zinc-950 p-3 select-none"
             onPointerMove={onPointerMove}
             onPointerUp={() => (dragRef.current = null)}
           >
             <div
-              className="relative mb-1 h-6 cursor-pointer border-b border-zinc-800"
+              className="relative mb-1 h-6 cursor-pointer border-b border-white/10"
               style={{ width: totalMs * pxPerMs }}
               onPointerDown={(e) => {
                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -323,13 +323,13 @@ export default function EditorView({ openId }: { openId?: string | null }) {
             </div>
 
             <div className="relative" style={{ width: totalMs * pxPerMs, height: LANE_H * 2 + 12 }}>
-              <div className="absolute inset-x-0 rounded bg-zinc-900" style={{ top: 0, height: LANE_H }} />
-              <div className="absolute inset-x-0 rounded bg-zinc-900" style={{ top: LANE_H + 8, height: LANE_H }} />
+              <div className="absolute inset-x-0 rounded bg-white/[0.06]" style={{ top: 0, height: LANE_H }} />
+              <div className="absolute inset-x-0 rounded bg-white/[0.06]" style={{ top: LANE_H + 8, height: LANE_H }} />
               {track.map((c) => (
                 <div key={c.id}
                   onPointerDown={(e) => grab(e, { kind: "move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
                   className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selected === c.id ? "border-emerald-500 bg-emerald-950/70" : "border-zinc-600 bg-zinc-800"
+                    selected === c.id ? "border-emerald-500 bg-emerald-950/70" : "border-zinc-600 bg-white/10"
                   }`}
                   style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: 4, height: LANE_H - 8 }}
                 >
@@ -344,7 +344,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                 <div key={t.id}
                   onPointerDown={(e) => grab(e, { kind: "text-move", clipId: t.id, startX: e.clientX, orig: { ...t } })}
                   className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selected === t.id ? "border-emerald-500 bg-emerald-950/70" : "border-zinc-600 bg-zinc-800/80"
+                    selected === t.id ? "border-emerald-500 bg-emerald-950/70" : "border-zinc-600 bg-white/10/80"
                   }`}
                   style={{ left: t.start_ms * pxPerMs, width: (t.end_ms - t.start_ms) * pxPerMs, top: LANE_H + 12, height: LANE_H - 8 }}
                 >

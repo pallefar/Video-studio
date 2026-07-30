@@ -7,15 +7,15 @@ import type {
 } from "../types/schema";
 
 const STATUS_STYLES: Record<string, string> = {
-  queued: "bg-zinc-800 text-zinc-300",
-  tts: "bg-sky-900/60 text-sky-300",
-  lipsync: "bg-sky-900/60 text-sky-300",
-  assemble: "bg-sky-900/60 text-sky-300",
-  review: "bg-amber-900/60 text-amber-300",
-  publishing: "bg-emerald-900/60 text-emerald-300",
-  published: "bg-emerald-900/60 text-emerald-300",
-  failed: "bg-red-900/60 text-red-300",
-  cancelled: "bg-zinc-800 text-zinc-500",
+  queued: "bg-white/10 text-zinc-300",
+  tts: "bg-sky-400/10 text-sky-300",
+  lipsync: "bg-sky-400/10 text-sky-300",
+  assemble: "bg-sky-400/10 text-sky-300",
+  review: "bg-amber-400/10 text-amber-300",
+  publishing: "bg-emerald-400/10 text-emerald-300",
+  published: "bg-emerald-400/10 text-emerald-300",
+  failed: "bg-red-400/10 text-red-300",
+  cancelled: "bg-white/10 text-zinc-500",
 };
 
 interface EmotionPreset {
@@ -43,7 +43,7 @@ function PreviewPlayer({ jobId, outputUri }: { jobId: string; outputUri: string 
     <video
       controls
       src={url}
-      className="w-full rounded-xl border border-zinc-800 bg-black"
+      className="w-full rounded-xl border border-white/10 bg-black"
     />
   );
 }
@@ -160,26 +160,26 @@ export default function AvatarView() {
   return (
     <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
       <aside className="space-y-4">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <h3 className="mb-3 text-sm font-medium text-zinc-300">New avatar video</h3>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <h3 className="mb-3 text-sm font-semibold tracking-tight text-zinc-100">New avatar video</h3>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Title"
-            className="mb-2 w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-zinc-500"
+            className="mb-2 w-full rounded border border-white/10 bg-black/40 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-lime-300/60"
           />
           <textarea
             value={script}
             onChange={(e) => setScript(e.target.value)}
             placeholder="Script — split into sentence segments at ingest, each with a pinned seed."
             rows={6}
-            className="mb-2 w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-zinc-500"
+            className="mb-2 w-full rounded border border-white/10 bg-black/40 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-lime-300/60"
           />
           <div className="mb-2 flex items-center gap-2">
             <select
               value={voiceId}
               onChange={(e) => setVoiceId(e.target.value)}
-              className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200"
+              className="flex-1 rounded border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-zinc-200"
             >
               {voices.length === 0 && <option value="">no voice profiles</option>}
               {voices.map((v) => (
@@ -188,7 +188,7 @@ export default function AvatarView() {
                 </option>
               ))}
             </select>
-            <button onClick={addVoice} className="rounded bg-zinc-800 px-2 py-1.5 text-xs hover:bg-zinc-700">
+            <button onClick={addVoice} className="rounded bg-white/10 px-2 py-1.5 text-xs hover:bg-white/15">
               + voice
             </button>
           </div>
@@ -196,7 +196,7 @@ export default function AvatarView() {
             <select
               value={loopId}
               onChange={(e) => setLoopId(e.target.value)}
-              className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200"
+              className="flex-1 rounded border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-zinc-200"
             >
               {loops.length === 0 && <option value="">no base loops</option>}
               {loops.map((l) => (
@@ -205,28 +205,28 @@ export default function AvatarView() {
                 </option>
               ))}
             </select>
-            <button onClick={addLoop} className="rounded bg-zinc-800 px-2 py-1.5 text-xs hover:bg-zinc-700">
+            <button onClick={addLoop} className="rounded bg-white/10 px-2 py-1.5 text-xs hover:bg-white/15">
               + loop
             </button>
           </div>
           <button
             onClick={submit}
             disabled={!title.trim() || !script.trim() || !voiceId || !loopId}
-            className="w-full rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40"
+            className="w-full rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200 disabled:opacity-40"
           >
             Render
           </button>
         </div>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <h3 className="mb-2 text-sm font-medium text-zinc-300">Jobs</h3>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <h3 className="mb-2 text-sm font-semibold tracking-tight text-zinc-100">Jobs</h3>
           <div className="space-y-1">
             {jobs.map((job) => (
               <button
                 key={job.id}
                 onClick={() => setSelectedId(job.id)}
                 className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
-                  selectedId === job.id ? "bg-zinc-800" : "hover:bg-zinc-800/60"
+                  selectedId === job.id ? "bg-white/10" : "hover:bg-white/5"
                 }`}
               >
                 <span className="truncate text-zinc-200">{job.title}</span>
@@ -264,7 +264,7 @@ export default function AvatarView() {
                 {selected.status === "failed" && (
                   <button
                     onClick={() => retry(selected)}
-                    className="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+                    className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/15"
                   >
                     Retry
                   </button>
@@ -277,7 +277,7 @@ export default function AvatarView() {
                       ? "Manual confirmation required — uploads always land private (C5)"
                       : "Publishing requires human review first"
                   }
-                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+                  className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40"
                 >
                   Publish (private)
                 </button>
@@ -286,9 +286,9 @@ export default function AvatarView() {
 
             <PreviewPlayer jobId={selected.id!} outputUri={selected.output_uri ?? null} />
 
-            <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.02]">
               <table className="w-full text-left text-sm">
-                <thead className="bg-zinc-900 text-xs uppercase tracking-wide text-zinc-500">
+                <thead className="bg-white/[0.04] text-[10px] uppercase tracking-[0.2em] text-zinc-500">
                   <tr>
                     <th className="px-3 py-2">#</th>
                     <th className="px-3 py-2">Text</th>
@@ -297,7 +297,7 @@ export default function AvatarView() {
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800">
+                <tbody className="divide-y divide-white/5">
                   {(selected.segments ?? []).map((segment) => (
                     <SegmentRow
                       key={segment.id}
@@ -331,7 +331,7 @@ function SegmentRow({
   const [emotion, setEmotion] = useState(segment.emotion ?? "");
   const reviewable = job.status === "review";
   return (
-    <tr className="bg-zinc-950/50">
+    <tr className="bg-white/[0.02]">
       <td className="px-3 py-2 text-xs text-zinc-500">{segment.idx}</td>
       <td className="max-w-md truncate px-3 py-2 text-zinc-300" title={segment.text}>
         {segment.text}
@@ -348,7 +348,7 @@ function SegmentRow({
           value={emotion}
           onChange={(e) => setEmotion(e.target.value)}
           disabled={!reviewable}
-          className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 disabled:opacity-50"
+          className="rounded border border-white/10 bg-black/40 px-2 py-1 text-xs text-zinc-200 disabled:opacity-50"
         >
           <option value="">{segment.emotion ?? "neutral"}</option>
           {emotions
@@ -365,7 +365,7 @@ function SegmentRow({
           onClick={() => onRerender(job, segment, emotion)}
           disabled={!reviewable}
           title={reviewable ? "Re-render this segment alone (pinned seed)" : "Available in review"}
-          className="rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700 disabled:opacity-40"
+          className="rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15 disabled:opacity-40"
         >
           Re-render
         </button>

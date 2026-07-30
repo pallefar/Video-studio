@@ -70,7 +70,7 @@ export default function LibraryView() {
 
   return (
     <section>
-      <h2 className="mb-1 text-base font-medium text-zinc-300">Asset library</h2>
+      <h2 className="mb-1 text-lg font-semibold tracking-tight text-zinc-100">Asset library</h2>
       <p className="mb-4 text-sm text-zinc-500">
         {assets.length} assets. Flagged or unapproved assets are never selected by the resolver.
       </p>
@@ -82,7 +82,7 @@ export default function LibraryView() {
       {notice && <p className="mb-4 text-sm text-emerald-400">{notice}</p>}
 
       {fxTarget && (
-        <div className="mb-4 rounded-xl border border-zinc-700 bg-zinc-900 p-4">
+        <div className="mb-4 rounded-2xl border border-lime-300/30 bg-white/[0.05] p-4">
           <p className="mb-2 text-sm text-zinc-300">
             Effects on <span className="text-zinc-100">{fxTarget.caption ?? fxTarget.uri}</span>
             <span className="ml-2 text-xs text-zinc-500">stack up to 3 · derives a new asset</span>
@@ -95,8 +95,8 @@ export default function LibraryView() {
                 title={effect.description}
                 className={`rounded-full px-3 py-1 text-xs transition ${
                   fxSelected.includes(effect.id)
-                    ? "bg-zinc-100 text-zinc-900"
-                    : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                    ? "bg-lime-300 text-black"
+                    : "bg-white/10 text-zinc-400 hover:bg-white/15"
                 }`}
               >
                 {effect.label}
@@ -115,7 +115,7 @@ export default function LibraryView() {
             <button
               onClick={applyFx}
               disabled={fxSelected.length === 0}
-              className="rounded bg-emerald-600 px-4 py-1.5 text-xs font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+              className="rounded bg-lime-300 px-4 py-1.5 text-xs font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40"
             >
               Apply
             </button>
@@ -124,16 +124,16 @@ export default function LibraryView() {
                 setFxTarget(null);
                 setFxSelected([]);
               }}
-              className="rounded bg-zinc-800 px-4 py-1.5 text-xs hover:bg-zinc-700"
+              className="rounded bg-white/10 px-4 py-1.5 text-xs hover:bg-white/15"
             >
               Cancel
             </button>
           </div>
         </div>
       )}
-      <div className="overflow-x-auto rounded-xl border border-zinc-800">
+      <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.02]">
         <table className="w-full text-left text-sm">
-          <thead className="bg-zinc-900 text-xs uppercase tracking-wide text-zinc-500">
+          <thead className="bg-white/[0.04] text-[10px] uppercase tracking-[0.2em] text-zinc-500">
             <tr>
               <th className="px-4 py-3">Caption</th>
               <th className="px-4 py-3">Origin</th>
@@ -143,12 +143,12 @@ export default function LibraryView() {
               <th className="px-4 py-3" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800">
+          <tbody className="divide-y divide-white/5">
             {assets.map((asset) => (
-              <tr key={asset.id} className="bg-zinc-950/50">
+              <tr key={asset.id} className="bg-white/[0.02]">
                 <td className="max-w-xs truncate px-4 py-3 text-zinc-300">{asset.caption ?? "—"}</td>
                 <td className="px-4 py-3">
-                  <span className="rounded bg-zinc-800 px-2 py-0.5 text-xs">{asset.origin}</span>
+                  <span className="rounded bg-white/10 px-2 py-0.5 text-xs">{asset.origin}</span>
                 </td>
                 <td className="px-4 py-3 text-zinc-400">{asset.license ?? "—"}</td>
                 <td className="px-4 py-3">
@@ -162,7 +162,7 @@ export default function LibraryView() {
                 <td className="px-4 py-3">
                   <button
                     onClick={() => fetch(`/assets/${asset.id}/ingest`, { method: "POST" }).then(refresh)}
-                    className="mr-2 rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+                    className="mr-2 rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
                     title="Produce editor derivatives: 720p proxy, scrub thumbnails, waveform"
                   >
                     Ingest
@@ -172,27 +172,27 @@ export default function LibraryView() {
                       setFxTarget(asset);
                       setFxSelected([]);
                     }}
-                    className="mr-2 rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+                    className="mr-2 rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
                     title="Apply VFX presets — derives a new asset, source untouched"
                   >
                     Effects
                   </button>
                   <button
                     onClick={() => upscale(asset)}
-                    className="mr-2 rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+                    className="mr-2 rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
                     title="Finishing pass (SeedVR2 upscale) — derives a new asset"
                   >
                     Upscale
                   </button>
                   <button
                     onClick={() => act(asset.id!, "approve")}
-                    className="mr-2 rounded bg-emerald-900/60 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-800/60"
+                    className="mr-2 rounded bg-lime-300/15 px-3 py-1 text-xs text-lime-300 hover:bg-lime-300/25"
                   >
                     Approve
                   </button>
                   <button
                     onClick={() => act(asset.id!, "flag")}
-                    className="rounded bg-red-900/50 px-3 py-1 text-xs text-red-300 hover:bg-red-800/50"
+                    className="rounded bg-red-400/10 px-3 py-1 text-xs text-red-300 hover:bg-red-400/20"
                   >
                     Flag
                   </button>

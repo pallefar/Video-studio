@@ -35,9 +35,9 @@ function ProjectAssets({ projectId }: { projectId: string }) {
   const row = (asset: AssetRead, inProject: boolean) => (
     <div
       key={asset.id}
-      className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2.5"
+      className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5"
     >
-      <span className="rounded bg-zinc-800 px-2 py-0.5 text-[10px] uppercase text-zinc-400">
+      <span className="rounded bg-white/10 px-2 py-0.5 text-[10px] uppercase text-zinc-400">
         {asset.origin}
       </span>
       <p className="flex-1 truncate text-sm text-zinc-300">{asset.caption ?? asset.uri}</p>
@@ -46,7 +46,7 @@ function ProjectAssets({ projectId }: { projectId: string }) {
         <>
           <button
             onClick={() => download(asset.id!)}
-            className="rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+            className="rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
             title="Presigned download — post to social media or use anywhere"
           >
             Download
@@ -62,7 +62,7 @@ function ProjectAssets({ projectId }: { projectId: string }) {
       ) : (
         <button
           onClick={() => link(asset.id!, "POST")}
-          className="rounded bg-emerald-900/60 px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-800/60"
+          className="rounded bg-lime-300/15 px-3 py-1 text-xs text-lime-300 hover:bg-lime-300/25"
         >
           Attach
         </button>
@@ -73,7 +73,7 @@ function ProjectAssets({ projectId }: { projectId: string }) {
   return (
     <div className="mt-8 grid gap-6 lg:grid-cols-2">
       <section>
-        <h3 className="mb-2 text-sm font-medium text-zinc-300">
+        <h3 className="mb-2 text-sm font-semibold tracking-tight text-zinc-100">
           Project assets <span className="text-zinc-500">({projectAssets.length})</span>
         </h3>
         <div className="space-y-2">
@@ -86,7 +86,7 @@ function ProjectAssets({ projectId }: { projectId: string }) {
         </div>
       </section>
       <section>
-        <h3 className="mb-2 text-sm font-medium text-zinc-300">
+        <h3 className="mb-2 text-sm font-semibold tracking-tight text-zinc-100">
           Library <span className="text-zinc-500">(shared across projects)</span>
         </h3>
         <div className="space-y-2">{attachable.map((a) => row(a, false))}</div>
@@ -136,8 +136,8 @@ export default function ProjectsView({
             onClick={() => setSelectedId(p.id!)}
             className={`rounded-lg px-4 py-2 text-sm ${
               p.id === selectedId
-                ? "bg-zinc-100 text-zinc-900"
-                : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                ? "bg-lime-300 text-black"
+                : "bg-white/[0.06] text-zinc-400 hover:text-zinc-200"
             }`}
           >
             {p.title}
@@ -151,12 +151,12 @@ export default function ProjectsView({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="New project title"
-            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600"
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm placeholder-zinc-600"
           />
           <button
             onClick={createProject}
             disabled={title.trim().length < 2}
-            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+            className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40"
           >
             + Project
           </button>
@@ -170,11 +170,11 @@ export default function ProjectsView({
         </p>
       ) : (
         <div>
-          <div className="mb-6 flex gap-1 border-b border-zinc-800 pb-3">
+          <div className="mb-6 flex gap-1 border-b border-white/10 pb-3">
             <button
               onClick={() => setStep("assets")}
               className={`rounded-full px-4 py-1.5 text-sm ${
-                step === "assets" ? "bg-zinc-100 text-zinc-900" : "text-zinc-400 hover:text-zinc-100"
+                step === "assets" ? "bg-lime-300 text-black" : "text-zinc-400 hover:text-zinc-100"
               }`}
             >
               1 · Asset center
@@ -182,7 +182,7 @@ export default function ProjectsView({
             <button
               onClick={() => setStep("video")}
               className={`rounded-full px-4 py-1.5 text-sm ${
-                step === "video" ? "bg-zinc-100 text-zinc-900" : "text-zinc-400 hover:text-zinc-100"
+                step === "video" ? "bg-lime-300 text-black" : "text-zinc-400 hover:text-zinc-100"
               }`}
             >
               2 · Video center

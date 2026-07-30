@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CameraPresetRead, GenerationRead } from "../types/schema";
 
+const CATEGORY_ART: Record<string, string> = {
+  zoom: "from-orange-500/50 via-rose-600/30 to-black/60",
+  dolly: "from-sky-500/50 via-indigo-600/30 to-black/60",
+  orbit: "from-violet-500/50 via-fuchsia-600/30 to-black/60",
+  pan: "from-emerald-500/45 via-teal-600/30 to-black/60",
+  tilt: "from-amber-500/50 via-orange-600/30 to-black/60",
+  crane: "from-rose-500/45 via-purple-600/30 to-black/60",
+  drone: "from-cyan-500/50 via-blue-600/30 to-black/60",
+  style: "from-lime-400/45 via-emerald-600/30 to-black/60",
+};
+
 const MAX_STACK = 3;
 
 interface CatalogEntry {
@@ -12,10 +23,10 @@ interface CatalogEntry {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  queued: "bg-zinc-800 text-zinc-300",
-  running: "bg-amber-900/60 text-amber-300",
-  succeeded: "bg-emerald-900/60 text-emerald-300",
-  failed: "bg-red-900/60 text-red-300",
+  queued: "bg-white/10 text-zinc-300",
+  running: "bg-amber-400/10 text-amber-300",
+  succeeded: "bg-emerald-400/10 text-emerald-300",
+  failed: "bg-red-400/10 text-red-300",
 };
 
 export default function CreateView({ projectId }: { projectId?: string }) {
@@ -97,7 +108,7 @@ export default function CreateView({ projectId }: { projectId?: string }) {
     <div className="space-y-8">
       <section>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-medium text-zinc-300">
+          <h2 className="text-lg font-semibold tracking-tight text-zinc-100">
             Camera moves
             <span className="ml-2 text-sm text-zinc-500">
               pick up to {MAX_STACK} · {selected.length} selected
@@ -110,7 +121,7 @@ export default function CreateView({ projectId }: { projectId?: string }) {
                 onClick={() => setCategory(c)}
                 className={`rounded-full px-3 py-1 text-xs capitalize transition ${
                   category === c
-                    ? "bg-zinc-700 text-zinc-100"
+                    ? "bg-lime-300 text-black"
                     : "text-zinc-500 hover:text-zinc-300"
                 }`}
               >
@@ -121,44 +132,62 @@ export default function CreateView({ projectId }: { projectId?: string }) {
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {visible.map((preset) => {
-            const active = selected.includes(preset.id);
+            const stackIndex = selected.indexOf(preset.id);
+            const active = stackIndex !== -1;
+            const art =
+              CATEGORY_ART[preset.category] ??
+              "from-zinc-700/40 via-zinc-800/30 to-zinc-900/40";
             return (
               <button
                 key={preset.id}
                 onClick={() => toggle(preset.id)}
-                className={`rounded-xl border p-4 text-left transition ${
+                className={`group relative overflow-hidden rounded-2xl border text-left transition ${
                   active
-                    ? "border-emerald-500 bg-emerald-950/40 ring-1 ring-emerald-500"
-                    : "border-zinc-800 bg-zinc-900 hover:border-zinc-600"
+                    ? "border-lime-300/80 ring-2 ring-lime-300/60"
+                    : "border-white/10 hover:border-white/30"
                 }`}
               >
-                <div className="mb-1 flex items-center justify-between">
-                  <span className="font-medium">{preset.label}</span>
+                <div
+                  className={`relative aspect-[4/3] w-full bg-gradient-to-br ${art} transition duration-300 group-hover:scale-[1.03]`}
+                >
+                  <span className="absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-zinc-300 backdrop-blur">
+                    {preset.category}
+                  </span>
                   {!preset.stackable && (
-                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                    <span className="absolute right-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-amber-300 backdrop-blur">
                       solo
                     </span>
                   )}
+                  {active && (
+                    <span className="absolute bottom-3 right-3 flex h-6 w-6 items-center justify-center rounded-full bg-lime-300 text-xs font-bold text-black shadow-[0_0_16px_rgba(190,242,100,0.6)]">
+                      {stackIndex + 1}
+                    </span>
+                  )}
                 </div>
-                <p className="text-xs leading-relaxed text-zinc-400">{preset.description}</p>
+                <div className="bg-black/60 p-3 backdrop-blur">
+                  <p className="text-sm font-semibold tracking-tight">{preset.label}</p>
+                  <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-zinc-500">
+                    {preset.description}
+                  </p>
+                </div>
               </button>
             );
           })}
         </div>
       </section>
 
-      <section className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
         <div className="flex flex-col gap-3 sm:flex-row">
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="Describe the subject — e.g. a steaming coffee cup on a wooden desk"
-            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-2.5 text-sm placeholder-zinc-600 outline-none focus:border-zinc-500"
+            className="flex-1 rounded-lg border border-white/10 bg-black/40 px-4 py-2.5 text-sm placeholder-zinc-600 outline-none focus:border-lime-300/60"
           />
           <select
             value={engine}
             onChange={(e) => setEngine(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm"
+            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm"
           >
             {catalog.map((entry) => (
               <option key={`${entry.provider}::${entry.model}`} value={`${entry.provider}::${entry.model}`}>
@@ -169,7 +198,7 @@ export default function CreateView({ projectId }: { projectId?: string }) {
           <button
             onClick={generate}
             disabled={busy || selected.length === 0 || subject.trim().length < 2}
-            className="rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white transition enabled:hover:bg-emerald-500 disabled:opacity-40"
+            className="rounded-lg bg-lime-300 px-6 py-2.5 text-sm font-semibold text-black transition enabled:hover:bg-lime-200 disabled:opacity-40"
           >
             {busy ? "Generating…" : "Generate"}
           </button>
@@ -178,7 +207,7 @@ export default function CreateView({ projectId }: { projectId?: string }) {
       </section>
 
       <section>
-        <h2 className="mb-4 text-base font-medium text-zinc-300">Generations</h2>
+        <h2 className="mb-4 text-lg font-semibold tracking-tight text-zinc-100">Generations</h2>
         <div className="space-y-2">
           {feed.length === 0 && (
             <p className="text-sm text-zinc-600">Nothing yet — pick a move and generate.</p>
@@ -186,7 +215,7 @@ export default function CreateView({ projectId }: { projectId?: string }) {
           {feed.map((generation) => (
             <div
               key={generation.id}
-              className="flex items-center gap-4 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
+              className="flex items-center gap-4 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3"
             >
               <span
                 className={`rounded-full px-2.5 py-0.5 text-xs ${STATUS_STYLES[generation.status ?? "queued"]}`}

@@ -1,10 +1,33 @@
 @import "tailwindcss";
 
-/* Dark cinematic base — preset-first UX in the Higgsfield mold. */
+/* Higgsfield-mold cinematic shell: near-black canvas, acid-lime accent,
+   soft radial glows, translucent panels. */
 :root {
   color-scheme: dark;
 }
 
 body {
-  @apply bg-zinc-950 text-zinc-100 antialiased;
+  @apply bg-[#050505] text-zinc-100 antialiased;
+  background-image:
+    radial-gradient(1100px 560px at 88% -12%, rgba(190, 242, 100, 0.08), transparent 62%),
+    radial-gradient(900px 520px at -12% 112%, rgba(139, 92, 246, 0.07), transparent 60%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(190, 242, 100, 0.35);
+  color: #000;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
 }

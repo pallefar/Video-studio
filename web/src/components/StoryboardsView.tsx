@@ -7,10 +7,10 @@ import type {
 } from "../types/schema";
 
 const STATUS_STYLES: Record<string, string> = {
-  queued: "bg-zinc-800 text-zinc-300",
-  running: "bg-amber-900/60 text-amber-300",
-  succeeded: "bg-emerald-900/60 text-emerald-300",
-  failed: "bg-red-900/60 text-red-300",
+  queued: "bg-white/10 text-zinc-300",
+  running: "bg-amber-400/10 text-amber-300",
+  succeeded: "bg-emerald-400/10 text-emerald-300",
+  failed: "bg-red-400/10 text-red-300",
 };
 
 interface ExportProgressInfo {
@@ -44,10 +44,10 @@ function ExportProgress({ refId }: { refId: string }) {
 
   if (!progress) return null;
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-2">
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-800">
+    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
         <div
-          className={`h-full rounded-full transition-all ${progress.done ? "bg-emerald-500" : "bg-amber-400"}`}
+          className={`h-full rounded-full transition-all ${progress.done ? "bg-lime-300" : "bg-amber-400"}`}
           style={{ width: `${progress.pct}%` }}
         />
       </div>
@@ -161,13 +161,13 @@ export default function StoryboardsView({
   return (
     <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
       <aside className="space-y-4">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <h3 className="mb-3 text-sm font-medium text-zinc-300">New storyboard</h3>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+          <h3 className="mb-3 text-sm font-semibold tracking-tight text-zinc-100">New storyboard</h3>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Video title"
-            className="mb-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600"
+            className="mb-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm placeholder-zinc-600"
           />
           <div className="mb-2 flex gap-1">
             {(["long", "short"] as const).map((f) => (
@@ -175,7 +175,7 @@ export default function StoryboardsView({
                 key={f}
                 onClick={() => setFormat(f)}
                 className={`flex-1 rounded-lg px-2 py-1.5 text-xs ${
-                  format === f ? "bg-zinc-100 text-zinc-900" : "bg-zinc-800 text-zinc-400"
+                  format === f ? "bg-lime-300 text-black" : "bg-white/10 text-zinc-400"
                 }`}
               >
                 {f === "long" ? "Long 16:9" : "Short 9:16"}
@@ -185,7 +185,7 @@ export default function StoryboardsView({
           <select
             value={styleId}
             onChange={(e) => setStyleId(e.target.value)}
-            className="mb-3 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm"
+            className="mb-3 w-full rounded-lg border border-white/10 bg-black/40 px-2 py-2 text-sm"
           >
             <option value="">No style template</option>
             {styles.map((s) => (
@@ -195,7 +195,7 @@ export default function StoryboardsView({
           <button
             onClick={createBoard}
             disabled={title.trim().length < 2}
-            className="w-full rounded-lg bg-emerald-600 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+            className="w-full rounded-lg bg-lime-300 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40"
           >
             Create
           </button>
@@ -206,10 +206,10 @@ export default function StoryboardsView({
               key={b.id}
               onClick={() => setSelectedId(b.id!)}
               className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
-                b.id === selectedId ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900"
+                b.id === selectedId ? "bg-white/10 text-zinc-100" : "text-zinc-400 hover:bg-white/5"
               }`}
             >
-              <span className="mr-2 rounded bg-zinc-700 px-1.5 py-0.5 text-[10px] uppercase">
+              <span className="mr-2 rounded bg-white/15 px-1.5 py-0.5 text-[10px] uppercase">
                 {b.format}
               </span>
               {b.title}
@@ -240,7 +240,7 @@ export default function StoryboardsView({
                   }
                   disabled={!allReady}
                   title={allReady ? "Open in the timeline editor" : "All shots need a finished asset first"}
-                  className="rounded-lg bg-zinc-800 px-5 py-2 text-sm font-medium enabled:hover:bg-zinc-700 disabled:opacity-40"
+                  className="rounded-lg bg-white/10 px-5 py-2 text-sm font-medium enabled:hover:bg-white/15 disabled:opacity-40"
                 >
                   Edit
                 </button>
@@ -248,7 +248,7 @@ export default function StoryboardsView({
                   onClick={() => act(`/storyboards/${board.id}/export`)}
                   disabled={!allReady}
                   title={allReady ? "Compile and render" : "All shots need a finished asset first"}
-                  className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+                  className="rounded-lg bg-lime-300 px-5 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40"
                 >
                   Export video
                 </button>
@@ -261,7 +261,7 @@ export default function StoryboardsView({
               {(board.shots ?? []).map((shot) => (
                 <div
                   key={shot.id}
-                  className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
+                  className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3"
                 >
                   <span className="w-6 text-xs text-zinc-500">#{shot.idx + 1}</span>
                   <div className="flex-1">
@@ -279,7 +279,7 @@ export default function StoryboardsView({
                   )}
                   <button
                     onClick={() => act(`/storyboards/${board.id}/shots/${shot.id}/generate`)}
-                    className="rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+                    className="rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
                   >
                     {shot.generation_id ? "Regenerate" : "Generate"}
                   </button>
@@ -297,8 +297,8 @@ export default function StoryboardsView({
               ))}
             </div>
 
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-              <h3 className="mb-2 text-sm font-medium text-zinc-300">Add shot</h3>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+              <h3 className="mb-2 text-sm font-semibold tracking-tight text-zinc-100">Add shot</h3>
               <div className="mb-2 flex flex-wrap gap-1">
                 {presets.map((p) => (
                   <button
@@ -306,8 +306,8 @@ export default function StoryboardsView({
                     onClick={() => toggleShotPreset(p.id)}
                     className={`rounded-full px-2.5 py-1 text-xs ${
                       shotPresets.includes(p.id)
-                        ? "bg-emerald-900/60 text-emerald-300 ring-1 ring-emerald-600"
-                        : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                        ? "bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/40"
+                        : "bg-white/10 text-zinc-400 hover:text-zinc-200"
                     }`}
                   >
                     {p.label}
@@ -319,7 +319,7 @@ export default function StoryboardsView({
                   value={shotSubject}
                   onChange={(e) => setShotSubject(e.target.value)}
                   placeholder="Shot subject — e.g. hands typing on a keyboard"
-                  className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600"
+                  className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm placeholder-zinc-600"
                 />
                 <input
                   type="number"
@@ -327,13 +327,13 @@ export default function StoryboardsView({
                   max={30}
                   value={shotDuration}
                   onChange={(e) => setShotDuration(Number(e.target.value))}
-                  className="w-20 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+                  className="w-20 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm"
                   title="Duration (seconds)"
                 />
                 <button
                   onClick={addShot}
                   disabled={shotSubject.trim().length < 2 || shotPresets.length === 0}
-                  className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 enabled:hover:bg-white disabled:opacity-40"
+                  className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200 enabled:hover:bg-white disabled:opacity-40"
                 >
                   Add
                 </button>

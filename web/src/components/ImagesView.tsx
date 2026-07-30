@@ -10,10 +10,10 @@ interface CatalogEntry {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  queued: "bg-zinc-800 text-zinc-300",
-  running: "bg-amber-900/60 text-amber-300",
-  succeeded: "bg-emerald-900/60 text-emerald-300",
-  failed: "bg-red-900/60 text-red-300",
+  queued: "bg-white/10 text-zinc-300",
+  running: "bg-amber-400/10 text-amber-300",
+  succeeded: "bg-emerald-400/10 text-emerald-300",
+  failed: "bg-red-400/10 text-red-300",
 };
 
 export default function ImagesView({ projectId }: { projectId?: string }) {
@@ -95,8 +95,8 @@ export default function ImagesView({ projectId }: { projectId?: string }) {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <section className="space-y-6">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-          <h2 className="mb-1 text-base font-medium text-zinc-300">Image studio</h2>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+          <h2 className="mb-1 text-lg font-semibold tracking-tight text-zinc-100">Image studio</h2>
           <p className="mb-4 text-sm text-zinc-500">
             Style-first stills. Frames &gt; 1 is storyboard mode: the sequence shares one seed
             and style so it holds together.
@@ -110,8 +110,8 @@ export default function ImagesView({ projectId }: { projectId?: string }) {
                 title={style.description}
                 className={`rounded-full px-3 py-1 text-xs transition ${
                   styleId === style.id
-                    ? "bg-zinc-100 text-zinc-900"
-                    : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                    ? "bg-lime-300 text-black"
+                    : "bg-white/10 text-zinc-400 hover:bg-white/15"
                 }`}
               >
                 {style.label}
@@ -124,7 +124,7 @@ export default function ImagesView({ projectId }: { projectId?: string }) {
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="a lighthouse keeper's desk, storm outside the window"
             rows={2}
-            className="mb-3 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-500"
+            className="mb-3 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-lime-300/60"
           />
 
           <div className="flex flex-wrap items-end gap-4">
@@ -133,7 +133,7 @@ export default function ImagesView({ projectId }: { projectId?: string }) {
               <select
                 value={engine}
                 onChange={(e) => setEngine(e.target.value)}
-                className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200"
+                className="rounded border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-zinc-200"
               >
                 {models.map((m) => (
                   <option key={`${m.provider}::${m.model}`} value={`${m.provider}::${m.model}`}>
@@ -158,7 +158,7 @@ export default function ImagesView({ projectId }: { projectId?: string }) {
               <select
                 value={identityId}
                 onChange={(e) => setIdentityId(e.target.value)}
-                className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200"
+                className="rounded border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-zinc-200"
               >
                 <option value="">none</option>
                 {consented.map((i) => (
@@ -172,15 +172,15 @@ export default function ImagesView({ projectId }: { projectId?: string }) {
             <button
               onClick={generate}
               disabled={busy || prompt.trim().length < 2}
-              className="rounded-lg bg-zinc-100 px-5 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40"
+              className="rounded-lg bg-lime-300 px-5 py-2 text-sm font-semibold text-black hover:bg-lime-200 disabled:opacity-40"
             >
               {frames > 1 ? `Generate ${frames} frames` : "Generate"}
             </button>
           </div>
         </div>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-          <h3 className="mb-1 text-sm font-medium text-zinc-300">YouTube thumbnail</h3>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+          <h3 className="mb-1 text-sm font-semibold tracking-tight text-zinc-100">YouTube thumbnail</h3>
           <p className="mb-3 text-xs text-zinc-500">
             1280x720 on the text-capable model — the title has to stay readable.
           </p>
@@ -189,12 +189,12 @@ export default function ImagesView({ projectId }: { projectId?: string }) {
               value={thumbTitle}
               onChange={(e) => setThumbTitle(e.target.value)}
               placeholder="Why your backlog is lying to you"
-              className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-500"
+              className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-lime-300/60"
             />
             <button
               onClick={thumbnail}
               disabled={busy || thumbTitle.trim().length < 2}
-              className="rounded-lg bg-zinc-800 px-5 py-2 text-sm font-medium enabled:hover:bg-zinc-700 disabled:opacity-40"
+              className="rounded-lg bg-white/10 px-5 py-2 text-sm font-medium enabled:hover:bg-white/15 disabled:opacity-40"
             >
               Generate thumbnail
             </button>
@@ -208,11 +208,11 @@ export default function ImagesView({ projectId }: { projectId?: string }) {
         )}
       </section>
 
-      <aside className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-        <h3 className="mb-3 text-sm font-medium text-zinc-300">Image feed</h3>
+      <aside className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+        <h3 className="mb-3 text-sm font-semibold tracking-tight text-zinc-100">Image feed</h3>
         <div className="space-y-2">
           {feed.slice(0, 20).map((generation) => (
-            <div key={generation.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+            <div key={generation.id} className="rounded-xl border border-white/5 bg-white/[0.02] p-3">
               <p className="truncate text-xs text-zinc-300" title={generation.prompt}>
                 {generation.prompt}
               </p>
