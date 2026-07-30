@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { poll } from "../lib";
 import type {
   CameraPresetRead,
   StoryboardRead,
@@ -7,10 +8,10 @@ import type {
 } from "../types/schema";
 
 const STATUS_STYLES: Record<string, string> = {
-  queued: "bg-white/10 text-zinc-300",
-  running: "bg-amber-400/10 text-amber-300",
-  succeeded: "bg-emerald-400/10 text-emerald-300",
-  failed: "bg-red-400/10 text-red-300",
+  queued: "chip-neutral",
+  running: "chip-amber",
+  succeeded: "chip-emerald",
+  failed: "chip-red",
 };
 
 interface ExportProgressInfo {
@@ -44,14 +45,14 @@ function ExportProgress({ refId }: { refId: string }) {
 
   if (!progress) return null;
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2">
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+    <div className="flex items-center gap-3 rounded-xl border border-edge bg-surface px-4 py-2">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-btn">
         <div
           className={`h-full rounded-full transition-all ${progress.done ? "bg-lime-300" : "bg-amber-400"}`}
           style={{ width: `${progress.pct}%` }}
         />
       </div>
-      <span className="w-32 text-right text-xs text-zinc-400">
+      <span className="w-32 text-right text-xs text-ink-muted">
         {progress.done
           ? "render complete"
           : `rendering ${progress.pct.toFixed(0)}% · ${(progress.rendered_ms / 1000).toFixed(1)}s / ${(progress.total_ms / 1000).toFixed(1)}s`}
@@ -94,9 +95,7 @@ export default function StoryboardsView({
   useEffect(() => {
     fetch("/styles").then((r) => r.json()).then(setStyles);
     fetch("/presets").then((r) => r.json()).then(setPresets);
-    refresh();
-    const timer = setInterval(refresh, 2500);
-    return () => clearInterval(timer);
+    return poll(refresh, 2500);
   }, [refresh]);
 
   const board = boards.find((b) => b.id === selectedId) ?? null;
@@ -161,13 +160,13 @@ export default function StoryboardsView({
   return (
     <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
       <aside className="space-y-4">
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-          <h3 className="mb-3 text-sm font-semibold tracking-tight text-zinc-100">New storyboard</h3>
+        <div className="rounded-2xl border border-edge bg-surface p-4">
+          <h3 className="mb-3 text-sm font-semibold tracking-tight text-ink">New storyboard</h3>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Video title"
-            className="mb-2 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm placeholder-zinc-600"
+            className="mb-2 w-full rounded-lg border border-edge bg-field px-3 py-2 text-sm placeholder-ink-faint"
           />
           <div className="mb-2 flex gap-1">
             {(["long", "short"] as const).map((f) => (
@@ -175,7 +174,7 @@ export default function StoryboardsView({
                 key={f}
                 onClick={() => setFormat(f)}
                 className={`flex-1 rounded-lg px-2 py-1.5 text-xs ${
-                  format === f ? "bg-lime-300 text-black" : "bg-white/10 text-zinc-400"
+                  format === f ? "bg-lime-300 text-black" : "bg-btn text-ink-muted"
                 }`}
               >
                 {f === "long" ? "Long 16:9" : "Short 9:16"}
@@ -185,7 +184,7 @@ export default function StoryboardsView({
           <select
             value={styleId}
             onChange={(e) => setStyleId(e.target.value)}
-            className="mb-3 w-full rounded-lg border border-white/10 bg-black/40 px-2 py-2 text-sm"
+            className="mb-3 w-full rounded-lg border border-edge bg-field px-2 py-2 text-sm"
           >
             <option value="">No style template</option>
             {styles.map((s) => (
@@ -206,10 +205,10 @@ export default function StoryboardsView({
               key={b.id}
               onClick={() => setSelectedId(b.id!)}
               className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
-                b.id === selectedId ? "bg-white/10 text-zinc-100" : "text-zinc-400 hover:bg-white/5"
+                b.id === selectedId ? "bg-btn text-ink" : "text-ink-muted hover:bg-surface2"
               }`}
             >
-              <span className="mr-2 rounded bg-white/15 px-1.5 py-0.5 text-[10px] uppercase">
+              <span className="mr-2 rounded bg-btn-hover px-1.5 py-0.5 text-[10px] uppercase">
                 {b.format}
               </span>
               {b.title}
@@ -220,13 +219,13 @@ export default function StoryboardsView({
 
       <section>
         {!board ? (
-          <p className="text-sm text-zinc-600">Create a storyboard to plan a video shot by shot.</p>
+          <p className="text-sm text-ink-faint">Create a storyboard to plan a video shot by shot.</p>
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-medium">{board.title}</h2>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-ink-muted">
                   {board.format === "short" ? "Short · 9:16 · max 60s" : "Full-length · 16:9"}
                   {board.style_id && ` · style: ${board.style_id}`} · {board.shots?.length ?? 0} shots
                 </p>
@@ -240,7 +239,7 @@ export default function StoryboardsView({
                   }
                   disabled={!allReady}
                   title={allReady ? "Open in the timeline editor" : "All shots need a finished asset first"}
-                  className="rounded-lg bg-white/10 px-5 py-2 text-sm font-medium enabled:hover:bg-white/15 disabled:opacity-40"
+                  className="rounded-lg bg-btn px-5 py-2 text-sm font-medium enabled:hover:bg-btn-hover disabled:opacity-40"
                 >
                   Edit
                 </button>
@@ -254,19 +253,19 @@ export default function StoryboardsView({
                 </button>
               </div>
             </div>
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error && <p className="text-sm text-danger">{error}</p>}
             <ExportProgress refId={board.id!} />
 
             <div className="space-y-2">
               {(board.shots ?? []).map((shot) => (
                 <div
                   key={shot.id}
-                  className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3"
+                  className="flex items-center gap-3 rounded-xl border border-edge bg-surface px-4 py-3"
                 >
-                  <span className="w-6 text-xs text-zinc-500">#{shot.idx + 1}</span>
+                  <span className="w-6 text-xs text-ink-muted">#{shot.idx + 1}</span>
                   <div className="flex-1">
-                    <p className="text-sm text-zinc-200">{shot.subject}</p>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-sm text-ink">{shot.subject}</p>
+                    <p className="text-xs text-ink-muted">
                       {(shot.preset_ids ?? []).join(" + ")} · {(shot.duration_target_ms ?? 0) / 1000}s
                     </p>
                   </div>
@@ -275,11 +274,11 @@ export default function StoryboardsView({
                       {shot.generation_status}
                     </span>
                   ) : (
-                    <span className="text-xs text-zinc-600">not generated</span>
+                    <span className="text-xs text-ink-faint">not generated</span>
                   )}
                   <button
                     onClick={() => act(`/storyboards/${board.id}/shots/${shot.id}/generate`)}
-                    className="rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
+                    className="rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
                   >
                     {shot.generation_id ? "Regenerate" : "Generate"}
                   </button>
@@ -297,8 +296,8 @@ export default function StoryboardsView({
               ))}
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-              <h3 className="mb-2 text-sm font-semibold tracking-tight text-zinc-100">Add shot</h3>
+            <div className="rounded-2xl border border-edge bg-surface p-4">
+              <h3 className="mb-2 text-sm font-semibold tracking-tight text-ink">Add shot</h3>
               <div className="mb-2 flex flex-wrap gap-1">
                 {presets.map((p) => (
                   <button
@@ -306,8 +305,8 @@ export default function StoryboardsView({
                     onClick={() => toggleShotPreset(p.id)}
                     className={`rounded-full px-2.5 py-1 text-xs ${
                       shotPresets.includes(p.id)
-                        ? "bg-emerald-400/10 text-emerald-300 ring-1 ring-emerald-400/40"
-                        : "bg-white/10 text-zinc-400 hover:text-zinc-200"
+                        ? "chip-emerald ring-1 ring-emerald-400/40"
+                        : "bg-btn text-ink-muted hover:text-ink"
                     }`}
                   >
                     {p.label}
@@ -319,7 +318,7 @@ export default function StoryboardsView({
                   value={shotSubject}
                   onChange={(e) => setShotSubject(e.target.value)}
                   placeholder="Shot subject — e.g. hands typing on a keyboard"
-                  className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm placeholder-zinc-600"
+                  className="flex-1 rounded-lg border border-edge bg-field px-3 py-2 text-sm placeholder-ink-faint"
                 />
                 <input
                   type="number"
@@ -327,7 +326,7 @@ export default function StoryboardsView({
                   max={30}
                   value={shotDuration}
                   onChange={(e) => setShotDuration(Number(e.target.value))}
-                  className="w-20 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm"
+                  className="w-20 rounded-lg border border-edge bg-field px-3 py-2 text-sm"
                   title="Duration (seconds)"
                 />
                 <button

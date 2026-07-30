@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { applyTheme, initialTheme, type Theme } from "./lib";
 import AvatarView from "./components/AvatarView";
 import CreateView from "./components/CreateView";
 import EditorView from "./components/EditorView";
@@ -48,6 +49,9 @@ const TITLES: Record<Tab, [string, string]> = {
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("create");
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+
+  useEffect(() => applyTheme(theme), [theme]);
   const [editorTimelineId, setEditorTimelineId] = useState<string | null>(null);
 
   const openEditor = (timelineId: string) => {
@@ -59,7 +63,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen">
-      <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-white/10 bg-black/40 px-4 py-6 backdrop-blur">
+      <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-edge bg-sidebar px-4 py-6 backdrop-blur">
         <div className="mb-8 flex items-center gap-2 px-2">
           <span className="inline-block h-2.5 w-2.5 rounded-full bg-lime-300 shadow-[0_0_12px_rgba(190,242,100,0.9)]" />
           <span className="text-sm font-bold uppercase tracking-[0.22em]">Video Studio</span>
@@ -68,7 +72,7 @@ export default function App() {
         <nav className="flex-1 space-y-6">
           {GROUPS.map((group) => (
             <div key={group.label}>
-              <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-zinc-600">
+              <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-ink-faint">
                 {group.label}
               </p>
               <div className="space-y-0.5">
@@ -80,13 +84,13 @@ export default function App() {
                       onClick={() => setTab(t)}
                       className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm capitalize transition ${
                         active
-                          ? "bg-lime-300/10 font-medium text-lime-300"
-                          : "text-zinc-400 hover:bg-white/5 hover:text-zinc-100"
+                          ? "bg-accent-soft font-medium text-accent"
+                          : "text-ink-muted hover:bg-surface2 hover:text-ink"
                       }`}
                     >
                       <svg
                         viewBox="0 0 24 24"
-                        className={`h-4 w-4 shrink-0 ${active ? "stroke-lime-300" : "stroke-zinc-500 group-hover:stroke-zinc-300"}`}
+                        className={`h-4 w-4 shrink-0 ${active ? "stroke-accent" : "stroke-ink-muted group-hover:stroke-ink-soft"}`}
                         fill="none"
                         strokeWidth="1.6"
                         strokeLinecap="round"
@@ -106,15 +110,31 @@ export default function App() {
           ))}
         </nav>
 
-        <p className="px-2 text-[10px] uppercase tracking-[0.2em] text-zinc-700">
-          self-hosted · rtx 3090
-        </p>
+        <div className="space-y-3 px-2">
+          <button
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            className="flex w-full items-center gap-2 rounded-xl bg-surface2 px-3 py-2 text-xs text-ink-muted transition hover:text-ink"
+            title="Toggle light / dark"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4 stroke-current" fill="none" strokeWidth="1.6" strokeLinecap="round">
+              {theme === "dark" ? (
+                <path d="M12 4V2M12 22v-2M4 12H2M22 12h-2M5.6 5.6L4.2 4.2M19.8 19.8l-1.4-1.4M5.6 18.4l-1.4 1.4M19.8 4.2l-1.4 1.4M12 17a5 5 0 100-10 5 5 0 000 10z" />
+              ) : (
+                <path d="M21 12.8A8.5 8.5 0 1111.2 3 6.6 6.6 0 0021 12.8z" />
+              )}
+            </svg>
+            {theme === "dark" ? "Light mode" : "Dark mode"}
+          </button>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-ink-faint">
+            self-hosted · rtx 3090
+          </p>
+        </div>
       </aside>
 
       <div className="min-w-0 flex-1">
-        <header className="border-b border-white/5 px-8 pb-5 pt-7">
+        <header className="border-b border-edge-soft px-8 pb-5 pt-7">
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-          <p className="mt-1 text-sm text-zinc-500">{tagline}</p>
+          <p className="mt-1 text-sm text-ink-muted">{tagline}</p>
         </header>
         <main className="mx-auto max-w-6xl px-8 py-8">
           {tab === "projects" && <ProjectsView onOpenEditor={openEditor} />}

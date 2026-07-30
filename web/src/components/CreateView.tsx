@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { poll } from "../lib";
 import type { CameraPresetRead, GenerationRead } from "../types/schema";
 
 const CATEGORY_ART: Record<string, string> = {
@@ -23,10 +24,10 @@ interface CatalogEntry {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  queued: "bg-white/10 text-zinc-300",
-  running: "bg-amber-400/10 text-amber-300",
-  succeeded: "bg-emerald-400/10 text-emerald-300",
-  failed: "bg-red-400/10 text-red-300",
+  queued: "chip-neutral",
+  running: "chip-amber",
+  succeeded: "chip-emerald",
+  failed: "chip-red",
 };
 
 export default function CreateView({ projectId }: { projectId?: string }) {
@@ -58,9 +59,7 @@ export default function CreateView({ projectId }: { projectId?: string }) {
   }, []);
 
   useEffect(() => {
-    refreshFeed();
-    const timer = setInterval(refreshFeed, 2000);
-    return () => clearInterval(timer);
+    return poll(refreshFeed, 2000);
   }, [refreshFeed]);
 
   const categories = useMemo(
@@ -108,9 +107,9 @@ export default function CreateView({ projectId }: { projectId?: string }) {
     <div className="space-y-8">
       <section>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold tracking-tight text-zinc-100">
+          <h2 className="text-lg font-semibold tracking-tight text-ink">
             Camera moves
-            <span className="ml-2 text-sm text-zinc-500">
+            <span className="ml-2 text-sm text-ink-muted">
               pick up to {MAX_STACK} · {selected.length} selected
             </span>
           </h2>
@@ -122,7 +121,7 @@ export default function CreateView({ projectId }: { projectId?: string }) {
                 className={`rounded-full px-3 py-1 text-xs capitalize transition ${
                   category === c
                     ? "bg-lime-300 text-black"
-                    : "text-zinc-500 hover:text-zinc-300"
+                    : "text-ink-muted hover:text-ink-soft"
                 }`}
               >
                 {c}
@@ -144,13 +143,13 @@ export default function CreateView({ projectId }: { projectId?: string }) {
                 className={`group relative overflow-hidden rounded-2xl border text-left transition ${
                   active
                     ? "border-lime-300/80 ring-2 ring-lime-300/60"
-                    : "border-white/10 hover:border-white/30"
+                    : "border-edge hover:border-edge-strong"
                 }`}
               >
                 <div
                   className={`relative aspect-[4/3] w-full bg-gradient-to-br ${art} transition duration-300 group-hover:scale-[1.03]`}
                 >
-                  <span className="absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-zinc-300 backdrop-blur">
+                  <span className="absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-white/85 backdrop-blur">
                     {preset.category}
                   </span>
                   {!preset.stackable && (
@@ -164,9 +163,9 @@ export default function CreateView({ projectId }: { projectId?: string }) {
                     </span>
                   )}
                 </div>
-                <div className="bg-black/60 p-3 backdrop-blur">
+                <div className="bg-tile p-3 backdrop-blur">
                   <p className="text-sm font-semibold tracking-tight">{preset.label}</p>
-                  <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-zinc-500">
+                  <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-ink-muted">
                     {preset.description}
                   </p>
                 </div>
@@ -176,18 +175,18 @@ export default function CreateView({ projectId }: { projectId?: string }) {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+      <section className="rounded-2xl border border-edge bg-surface p-5">
         <div className="flex flex-col gap-3 sm:flex-row">
           <input
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="Describe the subject — e.g. a steaming coffee cup on a wooden desk"
-            className="flex-1 rounded-lg border border-white/10 bg-black/40 px-4 py-2.5 text-sm placeholder-zinc-600 outline-none focus:border-lime-300/60"
+            className="flex-1 rounded-lg border border-edge bg-field px-4 py-2.5 text-sm placeholder-ink-faint outline-none focus:border-lime-300/60"
           />
           <select
             value={engine}
             onChange={(e) => setEngine(e.target.value)}
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2.5 text-sm"
+            className="rounded-lg border border-edge bg-field px-3 py-2.5 text-sm"
           >
             {catalog.map((entry) => (
               <option key={`${entry.provider}::${entry.model}`} value={`${entry.provider}::${entry.model}`}>
@@ -203,27 +202,27 @@ export default function CreateView({ projectId }: { projectId?: string }) {
             {busy ? "Generating…" : "Generate"}
           </button>
         </div>
-        {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+        {error && <p className="mt-3 text-sm text-danger">{error}</p>}
       </section>
 
       <section>
-        <h2 className="mb-4 text-lg font-semibold tracking-tight text-zinc-100">Generations</h2>
+        <h2 className="mb-4 text-lg font-semibold tracking-tight text-ink">Generations</h2>
         <div className="space-y-2">
           {feed.length === 0 && (
-            <p className="text-sm text-zinc-600">Nothing yet — pick a move and generate.</p>
+            <p className="text-sm text-ink-faint">Nothing yet — pick a move and generate.</p>
           )}
           {feed.map((generation) => (
             <div
               key={generation.id}
-              className="flex items-center gap-4 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3"
+              className="flex items-center gap-4 rounded-xl border border-edge bg-surface px-4 py-3"
             >
               <span
                 className={`rounded-full px-2.5 py-0.5 text-xs ${STATUS_STYLES[generation.status ?? "queued"]}`}
               >
                 {generation.status}
               </span>
-              <p className="flex-1 truncate text-sm text-zinc-300">{generation.prompt}</p>
-              <span className="text-xs text-zinc-500">
+              <p className="flex-1 truncate text-sm text-ink-soft">{generation.prompt}</p>
+              <span className="text-xs text-ink-muted">
                 {generation.provider} · {generation.model?.split("/").pop()}
                 {generation.cost != null && ` · $${generation.cost.toFixed(2)}`}
               </span>

@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import type { IdentityRead, IdentityTrainingStatus } from "../types/schema";
 
 const STATUS_STYLES: Record<IdentityTrainingStatus, string> = {
-  untrained: "bg-white/10 text-zinc-400",
-  queued: "bg-sky-400/10 text-sky-300",
-  training: "bg-amber-400/10 text-amber-300",
-  trained: "bg-emerald-400/10 text-emerald-300",
-  failed: "bg-red-400/10 text-red-300",
+  untrained: "bg-btn text-ink-muted",
+  queued: "chip-sky",
+  training: "chip-amber",
+  trained: "chip-emerald",
+  failed: "chip-red",
 };
 
 export default function IdentitiesView() {
@@ -56,35 +56,35 @@ export default function IdentitiesView() {
 
   return (
     <section>
-      <h2 className="mb-1 text-lg font-semibold tracking-tight text-zinc-100">Identities</h2>
-      <p className="mb-4 max-w-2xl text-sm text-zinc-500">
+      <h2 className="mb-1 text-lg font-semibold tracking-tight text-ink">Identities</h2>
+      <p className="mb-4 max-w-2xl text-sm text-ink-muted">
         Train a character once, reuse it across generations. Training and face-bearing
         generation require recorded consent (C6) — no consent, no training, structurally.
         Reference photos are attached from the asset library.
       </p>
       {error && (
-        <p role="alert" className="mb-4 text-sm text-red-400">
+        <p role="alert" className="mb-4 text-sm text-danger">
           {error}
         </p>
       )}
 
-      <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-        <label className="flex flex-col gap-1 text-xs text-zinc-500">
+      <div className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-edge bg-surface-dim p-4">
+        <label className="flex flex-col gap-1 text-xs text-ink-muted">
           Name
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="karsten"
-            className="w-48 rounded border border-white/10 bg-black/40 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-lime-300/60"
+            className="w-48 rounded border border-edge bg-field px-3 py-1.5 text-sm text-ink outline-none focus:border-lime-300/60"
           />
         </label>
-        <label className="flex flex-col gap-1 text-xs text-zinc-500">
+        <label className="flex flex-col gap-1 text-xs text-ink-muted">
           Description
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="channel host"
-            className="w-64 rounded border border-white/10 bg-black/40 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-lime-300/60"
+            className="w-64 rounded border border-edge bg-field px-3 py-1.5 text-sm text-ink outline-none focus:border-lime-300/60"
           />
         </label>
         <button
@@ -96,9 +96,9 @@ export default function IdentitiesView() {
         </button>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.02]">
+      <div className="overflow-x-auto rounded-2xl border border-edge bg-surface-dim">
         <table className="w-full text-left text-sm">
-          <thead className="bg-white/[0.04] text-[10px] uppercase tracking-[0.2em] text-zinc-500">
+          <thead className="bg-surface text-[10px] uppercase tracking-[0.2em] text-ink-muted">
             <tr>
               <th className="px-4 py-3">Name</th>
               <th className="px-4 py-3">Consent</th>
@@ -107,25 +107,25 @@ export default function IdentitiesView() {
               <th className="px-4 py-3" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="divide-y divide-edge-soft">
             {identities.map((identity) => (
-              <tr key={identity.id} className="bg-white/[0.02]">
+              <tr key={identity.id} className="bg-surface-dim">
                 <td className="px-4 py-3">
-                  <span className="text-zinc-200">{identity.name}</span>
+                  <span className="text-ink">{identity.name}</span>
                   {identity.description && (
-                    <span className="ml-2 text-xs text-zinc-500">{identity.description}</span>
+                    <span className="ml-2 text-xs text-ink-muted">{identity.description}</span>
                   )}
                 </td>
                 <td className="px-4 py-3">
                   {identity.has_consent ? (
                     <span
-                      className="text-emerald-400"
+                      className="text-success"
                       title={`Recorded by ${identity.consent_recorded_by} at ${identity.consent_at}`}
                     >
                       ✓ {identity.consent_recorded_by}
                     </span>
                   ) : (
-                    <span className="text-amber-400">⚠ none recorded</span>
+                    <span className="text-warn">⚠ none recorded</span>
                   )}
                 </td>
                 <td className="px-4 py-3">
@@ -136,14 +136,14 @@ export default function IdentitiesView() {
                     {identity.training_status}
                   </span>
                 </td>
-                <td className="max-w-xs truncate px-4 py-3 text-xs text-zinc-500">
+                <td className="max-w-xs truncate px-4 py-3 text-xs text-ink-muted">
                   {identity.lora_uri ?? "—"}
                 </td>
                 <td className="px-4 py-3 text-right">
                   {!identity.has_consent && (
                     <button
                       onClick={() => recordConsent(identity)}
-                      className="mr-2 rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
+                      className="mr-2 rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
                     >
                       Record consent
                     </button>
@@ -160,7 +160,7 @@ export default function IdentitiesView() {
                         ? "Train a LoRA on the wan lane (overnight batch)"
                         : "C6: training requires recorded consent"
                     }
-                    className="rounded bg-lime-300/15 px-3 py-1 text-xs text-lime-300 hover:bg-lime-300/25 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded bg-accent-soft px-3 py-1 text-xs text-accent hover:bg-accent-soft2 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {identity.training_status === "trained" ? "Retrain" : "Train"}
                   </button>
@@ -169,7 +169,7 @@ export default function IdentitiesView() {
             ))}
             {identities.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-zinc-600">
+                <td colSpan={5} className="px-4 py-8 text-center text-sm text-ink-faint">
                   No identities yet. Create one, record consent, then train.
                 </td>
               </tr>

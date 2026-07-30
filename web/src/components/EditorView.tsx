@@ -245,7 +245,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         <select
           value={current?.id ?? ""}
           onChange={(e) => e.target.value && load(e.target.value)}
-          className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm"
+          className="rounded-lg border border-edge bg-field px-3 py-2 text-sm"
         >
           <option value="">Open timeline…</option>
           {timelines.map((t) => (
@@ -265,27 +265,27 @@ export default function EditorView({ openId }: { openId?: string | null }) {
               Export
             </button>
             <button onClick={splitSelected} disabled={!selected}
-              className="rounded-lg bg-white/10 px-3 py-2 text-sm disabled:opacity-40">Split</button>
-            <button onClick={addText} className="rounded-lg bg-white/10 px-3 py-2 text-sm">+ Text</button>
+              className="rounded-lg bg-btn px-3 py-2 text-sm disabled:opacity-40">Split</button>
+            <button onClick={addText} className="rounded-lg bg-btn px-3 py-2 text-sm">+ Text</button>
             <button onClick={deleteSelected} disabled={!selected}
               className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300 disabled:opacity-40">Delete</button>
-            <label className="ml-2 text-xs text-zinc-500">
+            <label className="ml-2 text-xs text-ink-muted">
               zoom
               <input type="range" min={0.3} max={3} step={0.1} value={zoom}
                 onChange={(e) => setZoom(Number(e.target.value))} className="ml-1 align-middle" />
             </label>
           </>
         )}
-        {status && <span className="text-xs text-zinc-400">{status}</span>}
+        {status && <span className="text-xs text-ink-muted">{status}</span>}
       </div>
 
       {current && doc && (
         <>
           <div className="flex gap-4">
             <canvas ref={canvasRef} width={320} height={180}
-              className="rounded-lg border border-white/10 bg-black/40" />
-            <div className="flex-1 text-xs text-zinc-500">
-              <p className="mb-1 text-sm text-zinc-300">{current.title}</p>
+              className="rounded-lg border border-edge bg-field" />
+            <div className="flex-1 text-xs text-ink-muted">
+              <p className="mb-1 text-sm text-ink-soft">{current.title}</p>
               <p>{(totalMs / 1000).toFixed(1)}s · {track.length} clips · {texts.length} texts · v{current.version}</p>
               <p className="mt-2">Playhead {(playhead / 1000).toFixed(2)}s</p>
               {selectedText && (
@@ -297,19 +297,19 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                       if (t) t.text = e.target.value;
                     })
                   }
-                  className="mt-2 w-full rounded border border-white/10 bg-black/40 px-2 py-1 text-sm text-zinc-200"
+                  className="mt-2 w-full rounded border border-edge bg-field px-2 py-1 text-sm text-ink"
                 />
               )}
             </div>
           </div>
 
           <div
-            className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.02] bg-zinc-950 p-3 select-none"
+            className="overflow-x-auto rounded-2xl border border-edge bg-surface-dim p-3 select-none"
             onPointerMove={onPointerMove}
             onPointerUp={() => (dragRef.current = null)}
           >
             <div
-              className="relative mb-1 h-6 cursor-pointer border-b border-white/10"
+              className="relative mb-1 h-6 cursor-pointer border-b border-edge"
               style={{ width: totalMs * pxPerMs }}
               onPointerDown={(e) => {
                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -317,42 +317,42 @@ export default function EditorView({ openId }: { openId?: string | null }) {
               }}
             >
               {Array.from({ length: Math.ceil(totalMs / 1000) + 1 }, (_, s) => (
-                <span key={s} className="absolute top-1 text-[10px] text-zinc-600"
+                <span key={s} className="absolute top-1 text-[10px] text-ink-faint"
                   style={{ left: s * 1000 * pxPerMs }}>{s}s</span>
               ))}
             </div>
 
             <div className="relative" style={{ width: totalMs * pxPerMs, height: LANE_H * 2 + 12 }}>
-              <div className="absolute inset-x-0 rounded bg-white/[0.06]" style={{ top: 0, height: LANE_H }} />
-              <div className="absolute inset-x-0 rounded bg-white/[0.06]" style={{ top: LANE_H + 8, height: LANE_H }} />
+              <div className="absolute inset-x-0 rounded bg-surface2" style={{ top: 0, height: LANE_H }} />
+              <div className="absolute inset-x-0 rounded bg-surface2" style={{ top: LANE_H + 8, height: LANE_H }} />
               {track.map((c) => (
                 <div key={c.id}
                   onPointerDown={(e) => grab(e, { kind: "move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
                   className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selected === c.id ? "border-emerald-500 bg-emerald-950/70" : "border-zinc-600 bg-white/10"
+                    selected === c.id ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn"
                   }`}
                   style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: 4, height: LANE_H - 8 }}
                 >
-                  <span className="truncate text-zinc-300">{(clipLen(c) / 1000).toFixed(1)}s</span>
+                  <span className="truncate text-ink-soft">{(clipLen(c) / 1000).toFixed(1)}s</span>
                   <div onPointerDown={(e) => grab(e, { kind: "trim-l", clipId: c.id, startX: e.clientX, orig: { ...c } })}
-                    className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-zinc-500/60" />
+                    className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
                   <div onPointerDown={(e) => grab(e, { kind: "trim-r", clipId: c.id, startX: e.clientX, orig: { ...c } })}
-                    className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-zinc-500/60" />
+                    className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
                 </div>
               ))}
               {texts.map((t) => (
                 <div key={t.id}
                   onPointerDown={(e) => grab(e, { kind: "text-move", clipId: t.id, startX: e.clientX, orig: { ...t } })}
                   className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selected === t.id ? "border-emerald-500 bg-emerald-950/70" : "border-zinc-600 bg-white/10/80"
+                    selected === t.id ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
                   }`}
                   style={{ left: t.start_ms * pxPerMs, width: (t.end_ms - t.start_ms) * pxPerMs, top: LANE_H + 12, height: LANE_H - 8 }}
                 >
-                  <span className="truncate text-zinc-300">T: {t.text}</span>
+                  <span className="truncate text-ink-soft">T: {t.text}</span>
                   <div onPointerDown={(e) => grab(e, { kind: "text-l", clipId: t.id, startX: e.clientX, orig: { ...t } })}
-                    className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-zinc-500/60" />
+                    className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
                   <div onPointerDown={(e) => grab(e, { kind: "text-r", clipId: t.id, startX: e.clientX, orig: { ...t } })}
-                    className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-zinc-500/60" />
+                    className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
                 </div>
               ))}
               <div className="pointer-events-none absolute inset-y-0 w-px bg-emerald-400"
@@ -362,7 +362,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         </>
       )}
       {!current && (
-        <p className="text-sm text-zinc-600">
+        <p className="text-sm text-ink-faint">
           Open a timeline, or send a storyboard here with its "Edit" button.
         </p>
       )}

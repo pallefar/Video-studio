@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { poll } from "../lib";
 import type { AssetRead, ProjectRead } from "../types/schema";
 import CreateView from "./CreateView";
 import StoryboardsView from "./StoryboardsView";
@@ -15,9 +16,7 @@ function ProjectAssets({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   useEffect(() => {
-    refresh();
-    const timer = setInterval(refresh, 3000);
-    return () => clearInterval(timer);
+    return poll(refresh, 3000);
   }, [refresh]);
 
   const attached = new Set(projectAssets.map((a) => a.id));
@@ -35,18 +34,18 @@ function ProjectAssets({ projectId }: { projectId: string }) {
   const row = (asset: AssetRead, inProject: boolean) => (
     <div
       key={asset.id}
-      className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5"
+      className="flex items-center gap-3 rounded-xl border border-edge bg-surface px-4 py-2.5"
     >
-      <span className="rounded bg-white/10 px-2 py-0.5 text-[10px] uppercase text-zinc-400">
+      <span className="rounded bg-btn px-2 py-0.5 text-[10px] uppercase text-ink-muted">
         {asset.origin}
       </span>
-      <p className="flex-1 truncate text-sm text-zinc-300">{asset.caption ?? asset.uri}</p>
-      {asset.has_identifiable_people && <span className="text-xs text-amber-400">⚠</span>}
+      <p className="flex-1 truncate text-sm text-ink-soft">{asset.caption ?? asset.uri}</p>
+      {asset.has_identifiable_people && <span className="text-xs text-warn">⚠</span>}
       {inProject ? (
         <>
           <button
             onClick={() => download(asset.id!)}
-            className="rounded bg-white/10 px-3 py-1 text-xs hover:bg-white/15"
+            className="rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
             title="Presigned download — post to social media or use anywhere"
           >
             Download
@@ -62,7 +61,7 @@ function ProjectAssets({ projectId }: { projectId: string }) {
       ) : (
         <button
           onClick={() => link(asset.id!, "POST")}
-          className="rounded bg-lime-300/15 px-3 py-1 text-xs text-lime-300 hover:bg-lime-300/25"
+          className="rounded bg-accent-soft px-3 py-1 text-xs text-accent hover:bg-accent-soft2"
         >
           Attach
         </button>
@@ -73,12 +72,12 @@ function ProjectAssets({ projectId }: { projectId: string }) {
   return (
     <div className="mt-8 grid gap-6 lg:grid-cols-2">
       <section>
-        <h3 className="mb-2 text-sm font-semibold tracking-tight text-zinc-100">
-          Project assets <span className="text-zinc-500">({projectAssets.length})</span>
+        <h3 className="mb-2 text-sm font-semibold tracking-tight text-ink">
+          Project assets <span className="text-ink-muted">({projectAssets.length})</span>
         </h3>
         <div className="space-y-2">
           {projectAssets.length === 0 && (
-            <p className="text-sm text-zinc-600">
+            <p className="text-sm text-ink-faint">
               Nothing yet — generate above or attach from the library.
             </p>
           )}
@@ -86,8 +85,8 @@ function ProjectAssets({ projectId }: { projectId: string }) {
         </div>
       </section>
       <section>
-        <h3 className="mb-2 text-sm font-semibold tracking-tight text-zinc-100">
-          Library <span className="text-zinc-500">(shared across projects)</span>
+        <h3 className="mb-2 text-sm font-semibold tracking-tight text-ink">
+          Library <span className="text-ink-muted">(shared across projects)</span>
         </h3>
         <div className="space-y-2">{attachable.map((a) => row(a, false))}</div>
       </section>
@@ -137,7 +136,7 @@ export default function ProjectsView({
             className={`rounded-lg px-4 py-2 text-sm ${
               p.id === selectedId
                 ? "bg-lime-300 text-black"
-                : "bg-white/[0.06] text-zinc-400 hover:text-zinc-200"
+                : "bg-surface2 text-ink-muted hover:text-ink"
             }`}
           >
             {p.title}
@@ -151,7 +150,7 @@ export default function ProjectsView({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="New project title"
-            className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm placeholder-zinc-600"
+            className="rounded-lg border border-edge bg-field px-3 py-2 text-sm placeholder-ink-faint"
           />
           <button
             onClick={createProject}
@@ -164,17 +163,17 @@ export default function ProjectsView({
       </div>
 
       {!project ? (
-        <p className="text-sm text-zinc-600">
+        <p className="text-sm text-ink-faint">
           Pick or create a project. Each project runs through two centers: build the
           asset pool first, then assemble videos from it.
         </p>
       ) : (
         <div>
-          <div className="mb-6 flex gap-1 border-b border-white/10 pb-3">
+          <div className="mb-6 flex gap-1 border-b border-edge pb-3">
             <button
               onClick={() => setStep("assets")}
               className={`rounded-full px-4 py-1.5 text-sm ${
-                step === "assets" ? "bg-lime-300 text-black" : "text-zinc-400 hover:text-zinc-100"
+                step === "assets" ? "bg-lime-300 text-black" : "text-ink-muted hover:text-ink"
               }`}
             >
               1 · Asset center
@@ -182,7 +181,7 @@ export default function ProjectsView({
             <button
               onClick={() => setStep("video")}
               className={`rounded-full px-4 py-1.5 text-sm ${
-                step === "video" ? "bg-lime-300 text-black" : "text-zinc-400 hover:text-zinc-100"
+                step === "video" ? "bg-lime-300 text-black" : "text-ink-muted hover:text-ink"
               }`}
             >
               2 · Video center
