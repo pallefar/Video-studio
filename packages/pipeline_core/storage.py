@@ -93,6 +93,18 @@ class ObjectStore:
             keys.extend(obj["Key"] for obj in page.get("Contents", []))
         return keys
 
+    def usage(self, prefix: str = "") -> dict:
+        """Object count and total bytes under a prefix — the dashboard's
+        storage tile. One listing pass; fine at single-user scale."""
+        objects = 0
+        total_bytes = 0
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                objects += 1
+                total_bytes += obj.get("Size", 0)
+        return {"objects": objects, "bytes": total_bytes}
+
     def presign_get(self, key: str, expires_seconds: int = 3600) -> str:
         return self.client.generate_presigned_url(
             "get_object",

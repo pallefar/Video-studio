@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { applyTheme, initialTheme, type Theme } from "./lib";
 import AvatarView from "./components/AvatarView";
+import DashboardView from "./components/DashboardView";
 import CreateView from "./components/CreateView";
 import EditorView from "./components/EditorView";
 import IdentitiesView from "./components/IdentitiesView";
@@ -10,6 +11,7 @@ import ProjectsView from "./components/ProjectsView";
 import StoryboardsView from "./components/StoryboardsView";
 
 type Tab =
+  | "home"
   | "projects"
   | "create"
   | "images"
@@ -20,6 +22,7 @@ type Tab =
   | "identities";
 
 const ICONS: Record<Tab, string> = {
+  home: "M3 11l9-8 9 8M5 9v11a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V9",
   projects: "M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z",
   create: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9L19 15z",
   images: "M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm3 9l3-3 3 3 4-4 3 3M8.5 9.5a1 1 0 100.001 0z",
@@ -31,12 +34,14 @@ const ICONS: Record<Tab, string> = {
 };
 
 const GROUPS: { label: string; tabs: Tab[] }[] = [
+  { label: "Studio", tabs: ["home"] },
   { label: "Generate", tabs: ["create", "images", "avatar"] },
   { label: "Produce", tabs: ["storyboards", "editor"] },
   { label: "Manage", tabs: ["projects", "library", "identities"] },
 ];
 
 const TITLES: Record<Tab, [string, string]> = {
+  home: ["Studio", "Everything at a glance — renders, queues, storage."],
   projects: ["Projects", "Asset center first, video center after — assets are shared."],
   create: ["Create", "Preset-first video: pick a move, drop a subject, generate."],
   images: ["Image studio", "Styled stills, storyboard frames, thumbnails."],
@@ -48,7 +53,7 @@ const TITLES: Record<Tab, [string, string]> = {
 };
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("create");
+  const [tab, setTab] = useState<Tab>("home");
   const [theme, setTheme] = useState<Theme>(initialTheme);
 
   useEffect(() => applyTheme(theme), [theme]);
@@ -137,6 +142,7 @@ export default function App() {
           <p className="mt-1 text-sm text-ink-muted">{tagline}</p>
         </header>
         <main className="mx-auto max-w-6xl px-8 py-8">
+          {tab === "home" && <DashboardView onNavigate={(t) => setTab(t as Tab)} />}
           {tab === "projects" && <ProjectsView onOpenEditor={openEditor} />}
           {tab === "create" && <CreateView />}
           {tab === "images" && <ImagesView />}

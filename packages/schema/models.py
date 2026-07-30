@@ -502,7 +502,9 @@ class StoryboardCreate(StoryboardBase):
 
 
 class ShotBase(SQLModel):
-    idx: int
+    # non-negative: the reorder endpoint parks shots on negative idx values
+    # mid-renumber, so user-supplied idx must never live there
+    idx: int = Field(ge=0)
     subject: str
     preset_ids: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
     duration_target_ms: int = 5000

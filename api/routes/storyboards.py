@@ -139,6 +139,44 @@ async def add_shot(
     return _board_read(session, board)
 
 
+class ShotReorderRequest(BaseModel):
+    shot_ids: list[uuid.UUID]
+
+
+@router.post("/storyboards/{storyboard_id}/shots/reorder", response_model=StoryboardRead)
+async def reorder_shots(
+    storyboard_id: uuid.UUID,
+    body: ShotReorderRequest,
+    session: Session = Depends(get_session),
+):
+    """Reorder the board's shots to the given id sequence (drag-and-drop).
+    The list must be a permutation of the board's shots — nothing added,
+    nothing dropped."""
+    board = _get_board(session, storyboard_id)
+    shots = {shot.id: shot for shot in _shots(session, board.id)}
+    if set(body.shot_ids) != set(shots) or len(body.shot_ids) != len(shots):
+        raise HTTPException(
+            status_code=422, detail="shot_ids must be a permutation of the board's shots"
+        )
+
+    # two-phase renumber: park on idx values disjoint from EVERYTHING the
+    # board currently holds (legacy rows may carry negatives — ge=0 guards
+    # the API edge, not the table) so the (board, idx) unique constraint
+    # never collides mid-update
+    park_base = min(0, *(shot.idx for shot in shots.values())) - len(shots)
+    for position, shot_id in enumerate(body.shot_ids):
+        shots[shot_id].idx = park_base - position
+        session.add(shots[shot_id])
+    session.flush()
+    for position, shot_id in enumerate(body.shot_ids):
+        shots[shot_id].idx = position
+        session.add(shots[shot_id])
+    board.updated_at = utcnow()
+    session.add(board)
+    session.commit()
+    return _board_read(session, board)
+
+
 @router.delete("/storyboards/{storyboard_id}/shots/{shot_id}", response_model=StoryboardRead)
 async def delete_shot(
     storyboard_id: uuid.UUID, shot_id: uuid.UUID, session: Session = Depends(get_session)

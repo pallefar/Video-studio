@@ -72,6 +72,7 @@ export default function StoryboardsView({
   const [styles, setStyles] = useState<StyleTemplateRead[]>([]);
   const [presets, setPresets] = useState<CameraPresetRead[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
@@ -140,6 +141,35 @@ export default function StoryboardsView({
         setShotPresets([]);
       })
       .catch((e: Error) => setError(e.message));
+  };
+
+  const dropOn = (targetId: string) => {
+    if (!board || !dragId || dragId === targetId) return;
+    const ids = (board.shots ?? []).map((s) => s.id!);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(targetId);
+    if (from === -1 || to === -1) return;
+    ids.splice(to, 0, ...ids.splice(from, 1));
+    setDragId(null);
+    // optimistic: reflect the new order immediately so a second drag never
+    // computes its permutation from a stale list while the POST is in flight
+    setBoards((current) =>
+      current.map((b) =>
+        b.id === board.id
+          ? {
+              ...b,
+              shots: ids.map(
+                (id, index) => ({ ...(b.shots ?? []).find((s) => s.id === id)!, idx: index }),
+              ),
+            }
+          : b,
+      ),
+    );
+    api(`/storyboards/${board.id}/shots/reorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shot_ids: ids }),
+    }).catch((e: Error) => setError(e.message));
   };
 
   const act = (path: string) =>
@@ -260,8 +290,20 @@ export default function StoryboardsView({
               {(board.shots ?? []).map((shot) => (
                 <div
                   key={shot.id}
-                  className="flex items-center gap-3 rounded-xl border border-edge bg-surface px-4 py-3"
+                  draggable
+                  onDragStart={() => setDragId(shot.id!)}
+                  onDragEnd={() => setDragId(null)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    dropOn(shot.id!);
+                  }}
+                  className={`flex cursor-grab items-center gap-3 rounded-xl border bg-surface px-4 py-3 transition active:cursor-grabbing ${
+                    dragId === shot.id ? "border-lime-300/70 opacity-60" : "border-edge"
+                  }`}
+                  title="Drag to reorder"
                 >
+                  <span className="select-none text-ink-faint">⋮⋮</span>
                   <span className="w-6 text-xs text-ink-muted">#{shot.idx + 1}</span>
                   <div className="flex-1">
                     <p className="text-sm text-ink">{shot.subject}</p>
@@ -288,7 +330,7 @@ export default function StoryboardsView({
                         (e: Error) => setError(e.message),
                       )
                     }
-                    className="rounded bg-red-900/40 px-2 py-1 text-xs text-red-300 hover:bg-red-800/40"
+                    className="rounded chip-red px-2 py-1 text-xs hover:opacity-75"
                   >
                     ✕
                   </button>

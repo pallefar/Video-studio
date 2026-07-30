@@ -119,6 +119,50 @@ async def resolve(
     return asset
 
 
+_IMAGE_SUFFIXES = ("png", "jpg", "jpeg", "webp")
+
+
+@router.get("/thumbs")
+async def asset_thumbs(
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+):
+    """asset_id -> presigned thumbnail URL. Preference order: the M14 poster
+    frame, then the scrub sprite (older ingests), then the asset itself when
+    it is an image. Video assets without derivatives simply have no thumb —
+    the panel shows a placeholder. One store listing plus a column-only
+    select — never full Asset hydration (rows carry embedding vectors)."""
+    posters: dict[str, str] = {}
+    sprites: dict[str, str] = {}
+    for key in store.list_keys("assets/derived/"):
+        parts = key.split("/")
+        if len(parts) != 4:
+            continue
+        if parts[3] == "poster.jpg":
+            posters[parts[2]] = key
+        elif parts[3] == "sprite.jpg":
+            sprites[parts[2]] = key
+
+    thumbs: dict[str, str] = {}
+    for asset_id, uri in session.exec(select(Asset.id, Asset.uri)).all():
+        key_id = str(asset_id)
+        if key_id in posters:
+            thumbs[key_id] = store.presign_get(posters[key_id])
+        elif key_id in sprites:
+            thumbs[key_id] = store.presign_get(sprites[key_id])
+        elif uri.rsplit(".", 1)[-1].lower() in _IMAGE_SUFFIXES:
+            try:
+                bucket, key = store.parse_uri(uri)
+            except ValueError:
+                continue
+            if bucket != store.bucket:
+                # same guard download_asset enforces — never sign for a key
+                # the uri doesn't actually point at
+                continue
+            thumbs[key_id] = store.presign_get(key)
+    return thumbs
+
+
 @router.get("/{asset_id}", response_model=AssetRead)
 async def get_asset(asset_id: uuid.UUID, session: Session = Depends(get_session)):
     return _get_or_404(session, asset_id)
@@ -225,6 +269,7 @@ async def derived_media(
     urls = {}
     for name, key in [
         ("proxy", f"{prefix}/proxy.mp4"),
+        ("poster", f"{prefix}/poster.jpg"),
         ("sprite", f"{prefix}/sprite.jpg"),
         ("vtt", f"{prefix}/sprite.vtt"),
         ("peaks", f"{prefix}/peaks.json"),

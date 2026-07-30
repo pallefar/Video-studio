@@ -12,7 +12,13 @@ export default function LibraryView() {
   const [originFilter, setOriginFilter] = useState<string>("all");
   const [error, setError] = useState<string | null>(null);
 
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+
   const refresh = useCallback(() => {
+    fetch("/assets/thumbs")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then(setThumbs)
+      .catch(() => undefined);
     fetch("/assets")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
       .then(setAssets)
@@ -23,6 +29,19 @@ export default function LibraryView() {
     fetch("/effects").then((r) => r.json()).then(setEffects);
     refresh();
   }, [refresh]);
+
+  // presigned thumb URLs expire after 1 h — refresh well under that so a
+  // long-lived tab never shows broken previews
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!document.hidden)
+        fetch("/assets/thumbs")
+          .then((r) => (r.ok ? r.json() : {}))
+          .then(setThumbs)
+          .catch(() => undefined);
+    }, 600_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const act = (id: string, action: "approve" | "flag") => {
     fetch(`/assets/${id}/${action}`, { method: "POST" }).then(refresh);
@@ -167,6 +186,7 @@ export default function LibraryView() {
         <table className="w-full text-left text-sm">
           <thead className="bg-surface text-[10px] uppercase tracking-[0.2em] text-ink-muted">
             <tr>
+              <th className="w-24 px-4 py-3">Preview</th>
               <th className="px-4 py-3">Caption</th>
               <th className="px-4 py-3">Origin</th>
               <th className="px-4 py-3">License</th>
@@ -178,6 +198,20 @@ export default function LibraryView() {
           <tbody className="divide-y divide-edge-soft">
             {visible.map((asset) => (
               <tr key={asset.id} className="bg-surface-dim">
+                <td className="px-4 py-2">
+                  {thumbs[asset.id!] ? (
+                    <img
+                      src={thumbs[asset.id!]}
+                      alt=""
+                      loading="lazy"
+                      className="h-10 w-16 rounded-lg border border-edge object-cover object-left"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-16 items-center justify-center rounded-lg border border-edge bg-btn text-[9px] uppercase tracking-widest text-ink-faint">
+                      {asset.duration_ms ? "video" : "—"}
+                    </div>
+                  )}
+                </td>
                 <td className="max-w-xs truncate px-4 py-3 text-ink-soft">{asset.caption ?? "—"}</td>
                 <td className="px-4 py-3">
                   <span className="rounded bg-btn px-2 py-0.5 text-xs">{asset.origin}</span>

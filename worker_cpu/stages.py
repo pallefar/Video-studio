@@ -337,6 +337,9 @@ def ingest_stage(asset_id: str) -> dict | None:
         proxy = ing.make_proxy(binary, src, tmp_path / "proxy.mp4", info["has_audio"])
         store.put_file(f"{prefix}/proxy.mp4", proxy)
 
+        poster = ing.make_poster(binary, src, tmp_path / "poster.jpg", info["duration_ms"])
+        store.put_file(f"{prefix}/poster.jpg", poster)
+
         plan = ing.sprite_plan(info["duration_ms"], info["width"], info["height"])
         sprite = ing.make_sprites(binary, src, tmp_path / "sprite.jpg", plan)
         store.put_file(f"{prefix}/sprite.jpg", sprite)
