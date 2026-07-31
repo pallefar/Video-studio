@@ -52,7 +52,7 @@ function ProjectAssets({ projectId }: { projectId: string }) {
           </button>
           <button
             onClick={() => link(asset.id!, "DELETE")}
-            className="rounded bg-red-900/40 px-2 py-1 text-xs text-red-300 hover:bg-red-800/40"
+            className="rounded chip-red px-2 py-1 text-xs hover:opacity-75"
             title="Detach from this project (stays in the library and other projects)"
           >
             Detach
@@ -103,6 +103,7 @@ export default function ProjectsView({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("assets");
   const [title, setTitle] = useState("");
+  const [kind, setKind] = useState("video");
 
   const refresh = useCallback(() => {
     fetch("/projects").then((r) => r.json()).then(setProjects);
@@ -116,7 +117,7 @@ export default function ProjectsView({
     fetch("/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, kind }),
     })
       .then((r) => r.json())
       .then((p: ProjectRead) => {
@@ -139,13 +140,29 @@ export default function ProjectsView({
                 : "bg-surface2 text-ink-muted hover:text-ink"
             }`}
           >
+            {p.kind !== "video" && (
+              <span className="mr-1.5 rounded bg-black/20 px-1.5 py-0.5 text-[10px] uppercase tracking-wider">
+                {p.kind}
+              </span>
+            )}
             {p.title}
             <span className="ml-2 text-xs opacity-60">
               {p.asset_count ?? 0} assets · {p.storyboard_count ?? 0} videos
             </span>
           </button>
         ))}
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {["video", "movie", "game", "other"].map((k) => (
+            <button
+              key={k}
+              onClick={() => setKind(k)}
+              className={`rounded-full px-2.5 py-1 text-[11px] capitalize transition ${
+                kind === k ? "bg-lime-300 text-black" : "bg-btn text-ink-muted hover:bg-btn-hover"
+              }`}
+            >
+              {k}
+            </button>
+          ))}
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}

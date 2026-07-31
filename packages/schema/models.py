@@ -67,6 +67,15 @@ class VideoFormat(str, Enum):
     short = "short"    # 9:16 1080x1920, <= 60 s (Shorts/Reels/TikTok)
 
 
+class ProjectKind(str, Enum):
+    """What the project produces — one studio, many production types."""
+
+    video = "video"    # channel/social videos (the original flow)
+    movie = "movie"    # long-form, multi-scene film work
+    game = "game"      # game dev assets: sprites, textures, cutscenes, trailers
+    other = "other"    # anything else the pipeline serves
+
+
 class IdentityTrainingStatus(str, Enum):
     untrained = "untrained"
     queued = "queued"
@@ -443,6 +452,10 @@ class EffectPresetRead(BaseModel):
 class ProjectBase(SQLModel):
     title: str
     description: Optional[str] = None
+    kind: ProjectKind = Field(
+        default=ProjectKind.video,
+        sa_column=Column(sa.Enum(ProjectKind, native_enum=False, length=16), nullable=False),
+    )
 
 
 class Project(ProjectBase, table=True):
@@ -808,6 +821,7 @@ EXPORTED_ENUMS: list[type[Enum]] = [
     GenerationStatus,
     VideoFormat,
     IdentityTrainingStatus,
+    ProjectKind,
 ]
 
 EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [

@@ -31,6 +31,8 @@ dev = [
     "psycopg[binary]>=3.1",
     # static ffmpeg binary so render tests run without a system install
     "imageio-ffmpeg>=0.5",
+    # the MCP server is CPU-testable end-to-end (tests/test_mcp.py)
+    "mcp>=1.2",
 ]
 # YouTube publish (M6): installed where uploads actually run.
 publish = [
@@ -41,6 +43,10 @@ publish = [
 # Prompt enhancement (M18): Qwen3.5-4B GGUF on CPU via llama.cpp.
 enhance = [
     "llama-cpp-python>=0.2.80",
+]
+# MCP control surface (M21): drive the studio from any MCP-capable LLM.
+mcp = [
+    "mcp>=1.2",
 ]
 # Real sentence embeddings for the asset resolver (CPU); without it the
 # deterministic hashing embedder is used.
@@ -65,6 +71,7 @@ packages = [
     "worker_gpu.preprocess",
     "worker_cpu",
     "worker_cpu.ffmpeg",
+    "studio_mcp",
 ]
 
 [tool.setuptools.package-dir]

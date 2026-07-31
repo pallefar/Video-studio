@@ -224,3 +224,13 @@ alone for social posting.
 - [x] Panel: Projects home tab — project switcher, then "1 · Asset center" (preset generation scoped to the project + pool/library attach-detach-download) and "2 · Video center" (the project's storyboards)
 
 **Accept:** `pytest tests/test_projects.py` — cross-project asset sharing, auto-link on generation success, pooled-asset shots exporting, presigned downloads ✅ (2026-07-29)
+
+## M21 — MCP control surface (any-LLM access; movie/game/other productions)
+
+- [x] `studio_mcp` package: MCP server over stdio (`python -m studio_mcp`), a thin client of the HTTP API — every call passes the same routes and compliance gates as the panel; `STUDIO_API_URL` from env
+- [x] ~25 tools: stats, projects, library (search/provenance/downloads), preset video, styled/shared-seed images, thumbnails, music, VFX + Mix, upscale, full storyboard flow with export progress, avatar jobs to the review gate
+- [x] Human-judgement boundary is structural: publish (C5), consent (C6), and approve/flag have NO tools — asserted by `tests/test_mcp.py` against the server's tool registry
+- [x] Production workflow prompts shipped with the server: `movie_scene_workflow`, `game_asset_batch`, `youtube_video_workflow`
+- [x] `Project.kind` (video/movie/game/other, alembic 0012) organises productions; kind picker in the Projects tab
+
+**Accept:** `pytest tests/test_mcp.py` — tools drive the real app end-to-end via ASGI transport; forbidden tools cannot exist; project kinds round-trip; a game asset batch shares one seed ✅ (2026-07-30; setup guide in docs/mcp.md)

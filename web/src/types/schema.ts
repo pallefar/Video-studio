@@ -13,6 +13,8 @@ export type VideoFormat = "long" | "short";
 
 export type IdentityTrainingStatus = "untrained" | "queued" | "training" | "trained" | "failed";
 
+export type ProjectKind = "video" | "movie" | "game" | "other";
+
 export interface WatermarkConfig {
   text?: string;
   position?: "bottom_right";
@@ -286,11 +288,13 @@ export interface StoryboardRead {
 export interface ProjectCreate {
   title: string;
   description?: string | null;
+  kind?: ProjectKind;
 }
 
 export interface ProjectRead {
   title: string;
   description?: string | null;
+  kind?: ProjectKind;
   id: string;
   created_at: string;
   updated_at: string;
