@@ -359,7 +359,84 @@ def ingest_stage(asset_id: str) -> dict | None:
             session.commit()
 
     log.info("ingest_done", asset_id=asset_id, duration_ms=info["duration_ms"], peaks=len(peaks))
+
+    # Tail of the ingest fan-out (M24): now that a poster frame exists,
+    # auto-caption the asset so the resolver can find it by content.
+    # Best-effort — derivatives must land even if the queue is unreachable
+    # (the direct-invocation path in tests and scripts has no Redis).
+    try:
+        from pipeline_core.dispatch import Dispatcher
+        from pipeline_core.queues import QUEUE_CPU
+
+        Dispatcher().enqueue(
+            QUEUE_CPU, "worker_cpu.stages.caption_stage", asset_id, job_key=f"caption-{asset_id}"
+        )
+    except Exception:
+        log.warning("caption_enqueue_failed", asset_id=asset_id)
     return info
+
+
+_captioner = None
+
+
+def _get_captioner():
+    # one load per worker process, like every model in this codebase
+    global _captioner
+    if _captioner is None:
+        from pipeline_core.captioner import get_captioner
+
+        _captioner = get_captioner()
+    return _captioner
+
+
+_IMAGE_SUFFIXES = {"png", "jpg", "jpeg", "webp"}
+
+
+@timed_stage("caption")
+def caption_stage(asset_id: str, force: bool = False) -> str | None:
+    """Auto-caption one asset from its poster frame (or the image itself) and
+    re-embed for the resolver. Idempotent: a real, human-or-model caption is
+    never overwritten unless force=True (the --recaption path)."""
+    from pipeline_core.captioner import is_placeholder_caption
+
+    with open_session() as session:
+        asset = session.get(Asset, uuid.UUID(asset_id))
+        if asset is None:
+            raise ValueError(f"asset {asset_id} not found")
+        if not force and not is_placeholder_caption(asset.caption):
+            log.info("caption_skip_has_caption", asset_id=asset_id)
+            return None
+        uri = asset.uri
+
+    store = ObjectStore()
+    poster_key = f"{derived_prefix(asset_id)}/poster.jpg"
+    if store.exists(poster_key):
+        image_bytes = store.get_bytes(poster_key)
+    elif uri.rsplit(".", 1)[-1].lower() in _IMAGE_SUFFIXES:
+        _, key = store.parse_uri(uri)
+        image_bytes = store.get_bytes(key)
+    else:
+        log.info("caption_skip_no_frame", asset_id=asset_id)
+        return None
+
+    captioner = _get_captioner()
+    caption = captioner.caption(image_bytes)
+    if caption is None:
+        if not captioner.available:
+            log.warning("caption_skipped_no_model", asset_id=asset_id,
+                        hint="pip install -e '.[caption]'")
+        return None
+
+    with open_session() as session:
+        asset = session.get(Asset, uuid.UUID(asset_id))
+        if asset is None:
+            return None
+        asset.caption = caption
+        asset.embedding = get_embedder().embed(caption)
+        session.add(asset)
+        session.commit()
+    log.info("caption_done", asset_id=asset_id, caption=caption[:80])
+    return caption
 
 
 # Cached like the engines: one client per worker process. Tests inject fakes.

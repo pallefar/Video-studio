@@ -252,3 +252,12 @@ alone for social posting.
 - [x] Server: `GET /timelines/{id}/media` presigns audio-track assets alongside video clips
 
 **Accept:** `pytest tests/test_timeline_editor.py` incl. audio-media presigning ✅ (2026-07-31; playback/waveform/scrub verified in-browser against the live stack — note: Playwright's OSS Chromium lacks H.264, real Chrome plays the ingest proxies natively)
+
+## M24 — Library intelligence: Florence-2 auto-captioning
+
+- [x] `pipeline_core/captioner.py`: Florence-2-base (MIT, licence register §6) `<MORE_DETAILED_CAPTION>` on CPU behind the `[caption]` extra; `NoopCaptioner` fallback keeps the lane alive without weights; `is_placeholder_caption()` heuristic (filenames, uuids, upload defaults)
+- [x] Cpu-lane `caption_stage`: poster-frame source (image assets caption directly), idempotent — real captions are never overwritten unless `force`; caption is re-embedded so the M8 resolver finds assets by visual content; enqueued best-effort at the ingest tail
+- [x] `POST /assets/{id}/caption` (202, `?force=true` to overwrite) — same route the panel and MCP can use
+- [x] `scripts/backfill_embeddings.py`: fills missing resolver vectors inline; `--recaption` queues Florence-2 jobs for placeholder captions
+
+**Accept:** `pytest tests/test_captioning.py` — placeholder heuristic, stage idempotency + re-embedding with an injected fake captioner, ingest-tail wiring, backfill script ✅ (2026-07-31; the real Florence-2 load is a workstation install like every local model)

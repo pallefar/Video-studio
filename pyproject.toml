@@ -53,6 +53,14 @@ mcp = [
 embed = [
     "sentence-transformers>=3.0",
 ]
+# Auto-captioning (M24): Florence-2-base (MIT) on CPU describes poster
+# frames for resolver search. Without it caption_stage no-ops with a hint.
+caption = [
+    "transformers>=4.44",
+    "torch>=2.3",
+    "timm>=1.0",
+    "einops>=0.8",
+]
 # GPU deps install only on the 3090 host: pip install -e ".[gpu]"
 # Never imported at module top level outside lazily-guarded paths.
 gpu = [

@@ -261,6 +261,24 @@ async def ingest_asset(
     return {"queued": job_key}
 
 
+@router.post("/{asset_id}/caption", status_code=202)
+async def caption_asset(
+    asset_id: uuid.UUID,
+    force: bool = False,
+    session: Session = Depends(get_session),
+    dispatcher=Depends(get_dispatcher),
+):
+    """Queue auto-captioning (M24): Florence-2 describes the poster frame and
+    the caption is re-embedded for resolver search. force=true overwrites an
+    existing caption; the default only fills placeholders."""
+    _get_or_404(session, asset_id)
+    job_key = f"caption-{asset_id}"
+    dispatcher.enqueue(
+        QUEUE_CPU, "worker_cpu.stages.caption_stage", str(asset_id), force, job_key=job_key
+    )
+    return {"queued": job_key}
+
+
 @router.get("/{asset_id}/derived")
 async def derived_media(
     asset_id: uuid.UUID,
