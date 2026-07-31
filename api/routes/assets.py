@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict
 
@@ -75,6 +76,13 @@ async def list_assets(session: Session = Depends(get_session)):
     return session.exec(select(Asset).order_by(Asset.created_at)).all()
 
 
+# Media suffixes /upload accepts; anything else stores as .bin (still
+# usable, just never interpreted). The uuid key means the client filename
+# never reaches the object store — only this sanitised suffix does.
+_UPLOAD_SUFFIX_RE = re.compile(r"^[a-z0-9]{1,5}$")
+MAX_UPLOAD_MB = 2048
+
+
 @router.post("/upload", response_model=AssetRead, status_code=201)
 async def upload_asset(
     file: UploadFile,
@@ -87,10 +95,20 @@ async def upload_asset(
     import mimetypes
     from pathlib import PurePosixPath
 
-    suffix = PurePosixPath(file.filename or "upload.bin").suffix or ".bin"
-    key = f"assets/uploads/{uuid.uuid4()}{suffix}"
+    raw_suffix = PurePosixPath(file.filename or "upload.bin").suffix.lstrip(".").lower()
+    suffix = raw_suffix if _UPLOAD_SUFFIX_RE.match(raw_suffix) else "bin"
+    key = f"assets/uploads/{uuid.uuid4()}.{suffix}"
     content_type = file.content_type or mimetypes.guess_type(key)[0]
-    data = await file.read()
+
+    limit = MAX_UPLOAD_MB * 1024 * 1024
+    chunks: list[bytes] = []
+    received = 0
+    while chunk := await file.read(8 * 1024 * 1024):
+        received += len(chunk)
+        if received > limit:
+            raise HTTPException(status_code=413, detail=f"upload exceeds {MAX_UPLOAD_MB} MB")
+        chunks.append(chunk)
+    data = b"".join(chunks)
     uri = store.put_bytes(key, data, content_type=content_type)
 
     text = caption or (file.filename or "upload")

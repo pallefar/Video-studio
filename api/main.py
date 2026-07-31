@@ -47,6 +47,18 @@ def create_app() -> FastAPI:
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    # Production panel: serve the built SPA straight from the API when
+    # web/dist exists (npm run build), so the studio is one uvicorn process
+    # on 127.0.0.1 — no vite dev server, no Node runtime. Mounted last: API
+    # routes always win, the mount only catches what they didn't.
+    from pathlib import Path
+
+    dist = Path(__file__).resolve().parent.parent / "web" / "dist"
+    if dist.is_dir():
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=dist, html=True), name="panel")
+
     return app
 
 

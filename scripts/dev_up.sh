@@ -54,6 +54,10 @@ echo "==> render-lane worker (dev engines: DEV_ENGINES=$DEV_ENGINES)"
 $PY worker_gpu/run.py &
 PIDS+=($!)
 
+echo "==> wan-lane worker (generation queue)"
+$PY worker_gpu/run_wan.py &
+PIDS+=($!)
+
 echo "==> panel :5173"
 (cd web && npx vite --port 5173 --strictPort) &
 PIDS+=($!)

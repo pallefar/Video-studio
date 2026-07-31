@@ -540,14 +540,28 @@ def stock_ingest_stage(result: dict) -> str:
     always; has_identifiable_people defaults True until a human clears it;
     the asset starts unapproved.
     """
+    import re as _re
+
     stock = StockResult(**result)
     if not stock.license or not stock.source_url:
         raise ValueError("stock ingest requires license and source_url")
+    # The ingest body arrives from the client (relayed search result), so
+    # treat it as untrusted: only fetch over https, and only build keys from
+    # characters that cannot escape the assets/stock/ prefix or collide with
+    # other artefact namespaces in the bucket.
+    from urllib.parse import urlsplit
+
+    if urlsplit(stock.download_url).scheme != "https":
+        raise ValueError("stock download_url must be https")
+    provider = _re.sub(r"[^A-Za-z0-9_-]", "_", stock.provider)[:40]
+    external_id = _re.sub(r"[^A-Za-z0-9_-]", "_", stock.external_id)[:80]
+    if not provider or not external_id:
+        raise ValueError("stock ingest requires provider and external_id")
 
     store = ObjectStore()
     data = download(stock.download_url)
     extension = "mp4" if stock.kind == "video" else "jpg"
-    key = f"assets/stock/{stock.provider}/{stock.external_id}.{extension}"
+    key = f"assets/stock/{provider}/{external_id}.{extension}"
     uri = store.put_bytes(key, data)
 
     embedding = get_embedder().embed(stock.caption)

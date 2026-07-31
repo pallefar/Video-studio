@@ -70,6 +70,41 @@ Mac (dev mode): `cp deploy/launchd/*.plist ~/Library/LaunchAgents/ &&
 launchctl load ~/Library/LaunchAgents/com.studio.*.plist` — DEV_ENGINES=1 is
 baked into the plists; there is no GPU render unit on the Mac.
 
+## Security posture
+
+Single-user tool, deliberately without auth — the security boundary is the
+machine, and everything is built to stay inside it:
+
+- **Loopback only, everywhere.** The API binds 127.0.0.1 in every launcher
+  and service unit, and docker-compose publishes Postgres/Redis/MinIO on
+  `127.0.0.1:` only (they carry default dev credentials and no TLS — on
+  0.0.0.0 they'd be handed to the whole LAN). A rented-GPU worker reaches
+  the services over Tailscale/WireGuard, never via opened ports. Enforced
+  by `tests/test_security.py`.
+- **Uploads**: object keys are `uuid.{suffix}` with the suffix run through
+  a strict allowlist — the client filename never reaches the object store;
+  uploads are size-capped (413 beyond `MAX_UPLOAD_MB`).
+- **Stock ingest treats its body as untrusted** (it's a relayed search
+  result): downloads must be https, and provider/external-id are character-
+  sanitised so a hostile body cannot write outside `assets/stock/` or
+  overwrite other artefact namespaces.
+- **No shell composition.** Every ffmpeg/subprocess call passes an argument
+  list; there is no `shell=True`, no `eval`, no raw SQL (SQLModel bound
+  parameters throughout), and the React panel never uses
+  `dangerouslySetInnerHTML`.
+- **Secrets** live in `.env` (gitignored) and flow through `Settings`; they
+  are never logged. Presigned URLs expire after an hour.
+- **Same-origin only**: no CORS middleware exists — the dev server proxies,
+  and production serves the built panel from the API process itself.
+- The structural gates (C1–C6: watermark, disclosure, private uploads,
+  consent) are enforced in validators + tests, not UI — see
+  `tests/test_compliance.py`.
+
+Threat model note: MCP (`python -m studio_mcp`) gives any connected LLM the
+same powers as the panel *except* publish/consent/approve, which have no
+tools (asserted in `tests/test_mcp.py`). Don't connect MCP clients you
+wouldn't hand the panel to.
+
 ## Env
 
 `.env.example` is the canonical variable list — every `Settings` field
