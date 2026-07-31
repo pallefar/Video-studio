@@ -8,6 +8,7 @@ import type {
   TimelineDocument,
 } from "../types/schema";
 import { FrameSource } from "../lib/frameSource";
+import { useToast } from "../lib/toast";
 import { Bars } from "./charts";
 
 const PX_PER_MS = 0.06; // base zoom: 60px per second
@@ -92,6 +93,7 @@ const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLSelectElement;
 
 export default function EditorView({ openId }: { openId?: string | null }) {
+  const toast = useToast();
   const [timelines, setTimelines] = useState<TimelineDocRead[]>([]);
   const [current, setCurrent] = useState<TimelineDocRead | null>(null);
   const [doc, setDoc] = useState<TimelineDocument | null>(null);
@@ -687,17 +689,22 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         setCurrent(t);
         setDirty(false);
         setStatus(`saved v${t.version}`);
+        toast(`Saved v${t.version}`);
       } else {
-        setStatus((await r.json()).detail ?? `HTTP ${r.status}`);
+        const detail = (await r.json()).detail ?? `HTTP ${r.status}`;
+        setStatus(detail);
+        toast(String(detail), "error");
       }
     });
   };
 
   const exportTimeline = () => {
     if (!current) return;
-    fetch(`/timelines/${current.id}/export`, { method: "POST" }).then(async (r) =>
-      setStatus(r.ok ? "export queued" : ((await r.json()).detail ?? `HTTP ${r.status}`)),
-    );
+    fetch(`/timelines/${current.id}/export`, { method: "POST" }).then(async (r) => {
+      const detail = r.ok ? "Export queued" : ((await r.json()).detail ?? `HTTP ${r.status}`);
+      setStatus(String(detail));
+      toast(String(detail), r.ok ? "success" : "error");
+    });
   };
 
   // ---- transport: rAF playhead advance with real-time delta; spacebar toggles

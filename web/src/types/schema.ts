@@ -7,7 +7,7 @@ export type AssetOrigin = "generated" | "stock" | "own";
 
 export type GenerationKind = "text_to_video" | "image_to_video" | "video_to_video" | "image" | "upscale" | "music";
 
-export type GenerationStatus = "queued" | "running" | "succeeded" | "failed";
+export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type VideoFormat = "long" | "short";
 

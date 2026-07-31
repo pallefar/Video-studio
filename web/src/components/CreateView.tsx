@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { poll } from "../lib";
+import { useToast } from "../lib/toast";
 import type { CameraPresetRead, GenerationRead } from "../types/schema";
 
 const CATEGORY_ART: Record<string, string> = {
@@ -41,6 +42,14 @@ export default function CreateView({ projectId }: { projectId?: string }) {
   const [feed, setFeed] = useState<GenerationRead[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  const generationAction = (id: string, action: "retry" | "cancel") =>
+    fetch(`/generations/${id}/${action}`, { method: "POST" }).then(async (r) => {
+      if (r.ok) toast(action === "retry" ? "Generation requeued" : "Generation cancelled");
+      else toast((await r.json()).detail ?? `HTTP ${r.status}`, "error");
+      refreshFeed();
+    });
 
   useEffect(() => {
     fetch("/presets").then((r) => r.json()).then(setPresets);
@@ -228,6 +237,23 @@ export default function CreateView({ projectId }: { projectId?: string }) {
                 {generation.provider} · {generation.model?.split("/").pop()}
                 {generation.cost != null && ` · $${generation.cost.toFixed(2)}`}
               </span>
+              {generation.status === "failed" && (
+                <button
+                  onClick={() => generationAction(generation.id!, "retry")}
+                  title={generation.error ?? undefined}
+                  className="rounded bg-btn px-2.5 py-1 text-xs hover:bg-btn-hover"
+                >
+                  Retry
+                </button>
+              )}
+              {generation.status === "queued" && (
+                <button
+                  onClick={() => generationAction(generation.id!, "cancel")}
+                  className="rounded chip-red px-2.5 py-1 text-xs hover:opacity-75"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           ))}
         </div>

@@ -88,6 +88,11 @@ def run_generation(
         if generation.status == GenerationStatus.succeeded:
             log.info("generation_skip_idempotent", generation_id=generation_id)
             return
+        if generation.status == GenerationStatus.cancelled:
+            # cancelled while still queued — the RQ job fires anyway, so the
+            # worker honours the cancellation here
+            log.info("generation_skip_cancelled", generation_id=generation_id)
+            return
 
         generation.status = GenerationStatus.running
         generation.updated_at = utcnow()

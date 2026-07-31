@@ -62,6 +62,37 @@ def _count(session: Session, model, *where) -> int:
     return session.exec(stmt).one()
 
 
+def _worker_health() -> dict:
+    """RQ worker liveness + queue depths straight from redis. Degrades to
+    unavailable instead of failing the dashboard — same rule as the store."""
+    try:
+        from redis import Redis
+        from rq import Queue, Worker
+
+        from pipeline_core.queues import ALL_QUEUES
+        from pipeline_core.settings import Settings
+
+        connection = Redis.from_url(Settings().redis_url)
+        now = datetime.now(timezone.utc)
+        workers = []
+        for worker in Worker.all(connection=connection):
+            heartbeat = worker.last_heartbeat
+            if heartbeat is not None and heartbeat.tzinfo is None:
+                heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+            workers.append({
+                "name": worker.name,
+                "queues": worker.queue_names(),
+                "state": str(worker.get_state()),
+                "heartbeat_age_s": (
+                    round((now - heartbeat).total_seconds(), 1) if heartbeat else None
+                ),
+            })
+        queues = {name: Queue(name, connection=connection).count for name in ALL_QUEUES}
+        return {"available": True, "workers": workers, "queues": queues}
+    except Exception:
+        return {"available": False, "workers": [], "queues": {}}
+
+
 def _iso_utc(value: datetime) -> str:
     """Columns are naive-UTC (sa.DateTime without timezone) — say so
     explicitly instead of making clients guess."""
@@ -129,6 +160,7 @@ async def studio_stats(
         "projects": _count(session, Project),
         "storyboards": _count(session, Storyboard),
         "storage": _cached_usage(store),
+        "health": _worker_health(),
         "costs": {
             "total": round(total_cost, 4),
             "last_30d": round(month_cost, 4),

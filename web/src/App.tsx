@@ -8,7 +8,9 @@ import IdentitiesView from "./components/IdentitiesView";
 import ImagesView from "./components/ImagesView";
 import LibraryView from "./components/LibraryView";
 import ProjectsView from "./components/ProjectsView";
+import SettingsView from "./components/SettingsView";
 import StoryboardsView from "./components/StoryboardsView";
+import { ToastProvider } from "./lib/toast";
 
 type Tab =
   | "home"
@@ -19,7 +21,8 @@ type Tab =
   | "storyboards"
   | "editor"
   | "library"
-  | "identities";
+  | "identities"
+  | "settings";
 
 const ICONS: Record<Tab, string> = {
   home: "M3 11l9-8 9 8M5 9v11a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V9",
@@ -31,13 +34,14 @@ const ICONS: Record<Tab, string> = {
   editor: "M3 8h18M3 12h12M3 16h15M19 12l3 2-3 2v-4z",
   library: "M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z",
   identities: "M12 11a3 3 0 100-6 3 3 0 000 6zm-6 8a6 6 0 0112 0M17 8h4M19 6v4",
+  settings: "M12 15a3 3 0 100-6 3 3 0 000 6zm7.4-3a7.4 7.4 0 00-.1-1.2l2-1.5-2-3.5-2.4 1a7.4 7.4 0 00-2-1.2L14.5 3h-5l-.4 2.6a7.4 7.4 0 00-2 1.2l-2.4-1-2 3.5 2 1.5a7.4 7.4 0 000 2.4l-2 1.5 2 3.5 2.4-1a7.4 7.4 0 002 1.2l.4 2.6h5l.4-2.6a7.4 7.4 0 002-1.2l2.4 1 2-3.5-2-1.5c.1-.4.1-.8.1-1.2z",
 };
 
 const GROUPS: { label: string; tabs: Tab[] }[] = [
   { label: "Studio", tabs: ["home"] },
   { label: "Generate", tabs: ["create", "images", "avatar"] },
   { label: "Produce", tabs: ["storyboards", "editor"] },
-  { label: "Manage", tabs: ["projects", "library", "identities"] },
+  { label: "Manage", tabs: ["projects", "library", "identities", "settings"] },
 ];
 
 const TITLES: Record<Tab, [string, string]> = {
@@ -50,6 +54,7 @@ const TITLES: Record<Tab, [string, string]> = {
   editor: ["Editor", "Multi-track timeline over proxies, server-side final render."],
   library: ["Library", "Everything lands here — approve before anything can use it."],
   identities: ["Identities", "Train a character once. No consent, no training (C6)."],
+  settings: ["Settings", "What's configured, which workers are alive, queue depths."],
 };
 
 export default function App() {
@@ -67,6 +72,7 @@ export default function App() {
   const [title, tagline] = TITLES[tab];
 
   return (
+    <ToastProvider>
     <div className="flex min-h-screen">
       <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-edge bg-sidebar px-4 py-6 backdrop-blur">
         <div className="mb-8 flex items-center gap-2 px-2">
@@ -151,8 +157,10 @@ export default function App() {
           {tab === "editor" && <EditorView openId={editorTimelineId} />}
           {tab === "library" && <LibraryView />}
           {tab === "identities" && <IdentitiesView />}
+          {tab === "settings" && <SettingsView />}
         </main>
       </div>
     </div>
+    </ToastProvider>
   );
 }

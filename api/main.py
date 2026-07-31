@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from api.routes import (
     assets,
+    config,
     effects,
     emotions,
     generations,
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(metrics.router)
     app.include_router(music.router)
     app.include_router(stats.router)
+    app.include_router(config.router)
     app.include_router(publish.router)
 
     @app.get("/healthz")

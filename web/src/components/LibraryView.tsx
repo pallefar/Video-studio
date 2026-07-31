@@ -1,7 +1,9 @@
+import { useToast } from "../lib/toast";
 import { useCallback, useEffect, useState } from "react";
 import type { AssetRead, EffectPresetRead } from "../types/schema";
 
 export default function LibraryView() {
+  const toast = useToast();
   const [assets, setAssets] = useState<AssetRead[]>([]);
   const [effects, setEffects] = useState<EffectPresetRead[]>([]);
   const [fxTarget, setFxTarget] = useState<AssetRead | null>(null);
@@ -227,11 +229,30 @@ export default function LibraryView() {
                 <td className="px-4 py-3">{asset.approved ? "✓" : "—"}</td>
                 <td className="px-4 py-3">
                   <button
-                    onClick={() => fetch(`/assets/${asset.id}/ingest`, { method: "POST" }).then(refresh)}
+                    onClick={() =>
+                      fetch(`/assets/${asset.id}/ingest`, { method: "POST" }).then((r) => {
+                        toast(r.ok ? "Ingest queued" : "Ingest failed", r.ok ? "success" : "error");
+                        refresh();
+                      })
+                    }
                     className="mr-2 rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
                     title="Produce editor derivatives: 720p proxy, scrub thumbnails, waveform"
                   >
                     Ingest
+                  </button>
+                  <button
+                    onClick={() =>
+                      fetch(`/assets/${asset.id}/caption?force=true`, { method: "POST" }).then((r) =>
+                        toast(
+                          r.ok ? "Captioning queued (Florence-2)" : "Caption failed",
+                          r.ok ? "success" : "error",
+                        ),
+                      )
+                    }
+                    className="mr-2 rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
+                    title="Auto-caption from the poster frame and re-embed for search (M24)"
+                  >
+                    Caption
                   </button>
                   <button
                     onClick={() => {

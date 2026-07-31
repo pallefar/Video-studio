@@ -12,7 +12,13 @@ from api.validators.compliance import ComplianceError, check_identity_consented
 from pipeline_core.dispatch import Dispatcher
 from pipeline_core.generation import enqueue_generation
 from pipeline_core.providers import ProviderRegistry, UnknownModelError, build_registry
-from schema.models import Generation, GenerationCreate, GenerationRead, Identity
+from schema.models import (
+    Generation,
+    GenerationCreate,
+    GenerationRead,
+    GenerationStatus,
+    Identity,
+)
 
 router = APIRouter(prefix="/generations", tags=["generations"])
 
@@ -109,4 +115,49 @@ async def get_generation(generation_id: uuid.UUID, session: Session = Depends(ge
     generation = session.get(Generation, generation_id)
     if generation is None:
         raise HTTPException(status_code=404, detail="generation not found")
+    return generation
+
+
+@router.post("/{generation_id}/retry", response_model=GenerationRead)
+async def retry_generation(
+    generation_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    registry: ProviderRegistry = Depends(get_registry),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+):
+    """failed -> queued: re-enqueue with the original provider/model (and
+    whatever fallback chain remains). Failed generations stop being dead ends."""
+    generation = session.get(Generation, generation_id)
+    if generation is None:
+        raise HTTPException(status_code=404, detail="generation not found")
+    if generation.status != GenerationStatus.failed:
+        raise HTTPException(
+            status_code=409, detail=f"only failed generations can retry (status: {generation.status.value})"
+        )
+    generation.status = GenerationStatus.queued
+    generation.error = None
+    session.add(generation)
+    session.commit()
+    session.refresh(generation)
+    enqueue_generation(dispatcher, generation, registry)
+    return generation
+
+
+@router.post("/{generation_id}/cancel", response_model=GenerationRead)
+async def cancel_generation(
+    generation_id: uuid.UUID, session: Session = Depends(get_session)
+):
+    """queued -> cancelled. A running provider call is not interrupted —
+    cancellation is honoured when the worker picks the job up."""
+    generation = session.get(Generation, generation_id)
+    if generation is None:
+        raise HTTPException(status_code=404, detail="generation not found")
+    if generation.status != GenerationStatus.queued:
+        raise HTTPException(
+            status_code=409, detail=f"only queued generations can cancel (status: {generation.status.value})"
+        )
+    generation.status = GenerationStatus.cancelled
+    session.add(generation)
+    session.commit()
+    session.refresh(generation)
     return generation

@@ -60,6 +60,7 @@ class GenerationStatus(str, Enum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class VideoFormat(str, Enum):
