@@ -14,6 +14,10 @@ const PX_PER_MS = 0.06; // base zoom: 60px per second
 const SNAP_PX = 8;
 const LANE_H = 56;
 const AUDIO_SUFFIXES = ["wav", "mp3", "m4a", "aac", "ogg", "flac"];
+// Frame stepping matches the M16 compiler's output rate — a "frame" in the
+// editor is a real frame in the export.
+const FPS = 25;
+const FRAME_MS = 1000 / FPS;
 const VIDEO_SUFFIXES = ["mp4", "mov", "webm", "mkv"];
 
 // Two selectable layouts (persisted): "studio" is the OpenCut-style panel
@@ -103,6 +107,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   );
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [assetSearch, setAssetSearch] = useState("");
+  const [snapLine, setSnapLine] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [hover, setHover] = useState<{
@@ -112,6 +117,8 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     srcMs: number;
   } | null>(null);
   const dragRef = useRef<Drag>(null);
+  const rulerScrubRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videosRef = useRef<Record<string, HTMLVideoElement>>({});
   const audiosRef = useRef<Record<string, HTMLAudioElement>>({});
@@ -238,7 +245,11 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     setDirty(true);
   };
 
+  // snap() records what it snapped to so the drag can show OpenCut's snap
+  // indicator line; the ref is flushed to state after each mutate.
+  const lastSnapRef = useRef<number | null>(null);
   const snap = (ms: number, ignoreId: string) => {
+    lastSnapRef.current = null;
     if (!snapOn) return Math.max(0, Math.round(ms));
     const targets = [0, playhead];
     for (const c of [...track, ...audio]) {
@@ -246,10 +257,60 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       targets.push(c.start_ms, c.start_ms + clipLen(c));
     }
     for (const t of targets) {
-      if (Math.abs((ms - t) * pxPerMs) < SNAP_PX) return t;
+      if (Math.abs((ms - t) * pxPerMs) < SNAP_PX) {
+        lastSnapRef.current = t;
+        return t;
+      }
     }
     return Math.max(0, Math.round(ms));
   };
+
+  // OpenCut's placement rule, merged in: a drag can never create an overlap
+  // (previously overlaps were only rejected at save time as a 422).
+  const spanFree = (
+    lane: (TimelineClip | AudioClip)[], start: number, len: number, excludeId: string,
+  ) =>
+    !lane.some(
+      (c) => c.id !== excludeId && start < c.start_ms + clipLen(c) && start + len > c.start_ms,
+    );
+
+  const resolveStart = (
+    lane: (TimelineClip | AudioClip)[], proposed: number, len: number, excludeId: string,
+  ): number | null => {
+    const target = Math.max(0, proposed);
+    if (spanFree(lane, target, len, excludeId)) return target;
+    let best: number | null = null;
+    for (const c of lane) {
+      if (c.id === excludeId) continue;
+      for (const candidate of [c.start_ms - len, c.start_ms + clipLen(c)]) {
+        if (candidate < 0 || !spanFree(lane, candidate, len, excludeId)) continue;
+        if (best === null || Math.abs(candidate - target) < Math.abs(best - target)) {
+          best = candidate;
+        }
+      }
+    }
+    return best;
+  };
+
+  const nextNeighbourStart = (
+    lane: (TimelineClip | AudioClip)[], after: number, excludeId: string,
+  ) =>
+    lane.reduce(
+      (min, c) =>
+        c.id !== excludeId && c.start_ms >= after ? Math.min(min, c.start_ms) : min,
+      Infinity,
+    );
+
+  const prevNeighbourEnd = (
+    lane: (TimelineClip | AudioClip)[], before: number, excludeId: string,
+  ) =>
+    lane.reduce(
+      (max, c) =>
+        c.id !== excludeId && c.start_ms + clipLen(c) <= before
+          ? Math.max(max, c.start_ms + clipLen(c))
+          : max,
+      0,
+    );
 
   const onPointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
@@ -272,33 +333,52 @@ export default function EditorView({ openId }: { openId?: string | null }) {
           t.end_ms = Math.max(snap(o.end_ms + dMs, t.id), o.start_ms + 100);
         }
       } else if (drag.kind.startsWith("audio")) {
-        const c = d.audio_tracks?.[0]?.find((x) => x.id === drag.clipId);
+        const lane = d.audio_tracks?.[0];
+        const c = lane?.find((x) => x.id === drag.clipId);
         const o = drag.orig as AudioClip;
-        if (!c) return;
+        if (!c || !lane) return;
         if (drag.kind === "audio-move") {
-          c.start_ms = snap(o.start_ms + dMs, c.id);
+          const start = resolveStart(lane, snap(o.start_ms + dMs, c.id), clipLen(o), c.id);
+          if (start !== null) c.start_ms = start;
         } else if (drag.kind === "audio-l") {
-          const shift = Math.max(-inMs(o), Math.min(dMs, clipLen(o) - 100));
+          const minStart = prevNeighbourEnd(lane, o.start_ms, c.id);
+          const shift = Math.max(
+            minStart - o.start_ms, Math.max(-inMs(o), Math.min(dMs, clipLen(o) - 100)),
+          );
           c.in_ms = Math.round(inMs(o) + shift);
-          c.start_ms = snap(o.start_ms + shift, c.id);
+          c.start_ms = Math.max(minStart, snap(o.start_ms + shift, c.id));
         } else {
-          c.out_ms = Math.round(Math.max(inMs(o) + 100, o.out_ms + dMs));
+          const cap = nextNeighbourStart(lane, o.start_ms + 1, c.id);
+          const maxOut = cap === Infinity ? Infinity : inMs(o) + (cap - o.start_ms);
+          c.out_ms = Math.round(
+            Math.min(maxOut, Math.max(inMs(o) + 100, o.out_ms + dMs)),
+          );
         }
       } else {
-        const c = d.video_tracks![0].find((x) => x.id === drag.clipId);
+        const lane = d.video_tracks![0];
+        const c = lane.find((x) => x.id === drag.clipId);
         const o = drag.orig as TimelineClip;
         if (!c) return;
         if (drag.kind === "move") {
-          c.start_ms = snap(o.start_ms + dMs, c.id);
+          const start = resolveStart(lane, snap(o.start_ms + dMs, c.id), clipLen(o), c.id);
+          if (start !== null) c.start_ms = start;
         } else if (drag.kind === "trim-l") {
-          const shift = Math.max(-inMs(o), Math.min(dMs, clipLen(o) - 100));
+          const minStart = prevNeighbourEnd(lane, o.start_ms, c.id);
+          const shift = Math.max(
+            minStart - o.start_ms, Math.max(-inMs(o), Math.min(dMs, clipLen(o) - 100)),
+          );
           c.in_ms = Math.round(inMs(o) + shift);
-          c.start_ms = snap(o.start_ms + shift, c.id);
+          c.start_ms = Math.max(minStart, snap(o.start_ms + shift, c.id));
         } else {
-          c.out_ms = Math.round(Math.max(inMs(o) + 100, o.out_ms + dMs));
+          const cap = nextNeighbourStart(lane, o.start_ms + 1, c.id);
+          const maxOut = cap === Infinity ? Infinity : inMs(o) + (cap - o.start_ms);
+          c.out_ms = Math.round(
+            Math.min(maxOut, Math.max(inMs(o) + 100, o.out_ms + dMs)),
+          );
         }
       }
     }, record);
+    setSnapLine(lastSnapRef.current);
   };
 
   const grab = (e: React.PointerEvent, drag: NonNullable<Drag>) => {
@@ -493,20 +573,31 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const pasteClipboard = () => {
     const clip = clipboardRef.current;
     if (!clip) return;
+    // OpenCut pastes at the playhead; our lanes have a no-overlap rule.
+    // Merged: paste at the playhead when the whole run fits there, else
+    // append at the lane end.
+    const pasteBase = (
+      lane: (TimelineClip | AudioClip)[], items: (TimelineClip | AudioClip)[],
+    ) => {
+      let cursor = playhead;
+      const fits = items.every((c) => {
+        const free = spanFree(lane, cursor, clipLen(c), "");
+        cursor += clipLen(c);
+        return free;
+      });
+      return fits
+        ? playhead
+        : lane.reduce((e, c) => Math.max(e, c.start_ms + clipLen(c)), 0);
+    };
     mutate((d) => {
-      // lanes have a no-overlap rule, so pasted clips append at the lane end
-      let end = d.video_tracks![0].reduce(
-        (e, c) => Math.max(e, c.start_ms + clipLen(c)), 0,
-      );
+      let end = pasteBase(d.video_tracks![0], clip.video);
       for (const c of clip.video) {
         d.video_tracks![0].push({ ...c, id: crypto.randomUUID(), start_ms: end });
         end += clipLen(c);
       }
       if (clip.audio.length) {
         if (!d.audio_tracks || d.audio_tracks.length === 0) d.audio_tracks = [[]];
-        let audioEnd = d.audio_tracks[0].reduce(
-          (e, c) => Math.max(e, c.start_ms + clipLen(c)), 0,
-        );
+        let audioEnd = pasteBase(d.audio_tracks[0], clip.audio);
         for (const c of clip.audio) {
           d.audio_tracks[0].push({ ...c, id: crypto.randomUUID(), start_ms: audioEnd });
           audioEnd += clipLen(c);
@@ -602,8 +693,8 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       else if (e.code === "Space" || key === "k") setPlaying((p) => !p);
       else if (key === "j") seek(-1000);
       else if (key === "l") seek(1000);
-      else if (key === "arrowleft") seek(e.shiftKey ? -1000 : -100);
-      else if (key === "arrowright") seek(e.shiftKey ? 1000 : 100);
+      else if (key === "arrowleft") seek(e.shiftKey ? -1000 : -FRAME_MS);
+      else if (key === "arrowright") seek(e.shiftKey ? 1000 : FRAME_MS);
       else if (key === "home") setPlayhead(0);
       else if (key === "end") setPlayhead(totalMs);
       else if (key === "s") splitSelected("both");
@@ -618,6 +709,31 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // ---- ctrl/cmd + wheel zooms the timeline anchored at the cursor (also
+  // catches trackpad pinch, which browsers deliver as ctrl+wheel) — the
+  // OpenCut zoom gesture; the slider stays for coarse control. Native
+  // listener because React's synthetic wheel handlers are passive.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: globalThis.WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const cursorPx = e.clientX - rect.left;
+      const timeAt = (el.scrollLeft + cursorPx) / pxPerMs;
+      setZoom((z) => {
+        const next = Math.min(3, Math.max(0.3, z * Math.exp(-e.deltaY * 0.0015)));
+        requestAnimationFrame(() => {
+          el.scrollLeft = Math.max(0, timeAt * PX_PER_MS * next - cursorPx);
+        });
+        return next;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [pxPerMs, current?.id]);
 
   // ---- preview: draw the active clip's frame + active texts, no server round-trips
   useEffect(() => {
@@ -1004,19 +1120,32 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     </div>
   );
 
+  const seekFromRuler = (e: React.PointerEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPlayhead(Math.min(totalMs, Math.max(0, (e.clientX - rect.left) / pxPerMs)));
+  };
+
   const timelineStrip = (
     <div
+      ref={scrollRef}
       className="overflow-x-auto rounded-2xl border border-edge bg-surface-dim p-3 select-none"
       onPointerMove={onPointerMove}
-      onPointerUp={() => (dragRef.current = null)}
+      onPointerUp={() => {
+        dragRef.current = null;
+        setSnapLine(null);
+      }}
     >
       <div
         className="relative mb-1 h-6 cursor-pointer border-b border-edge"
         style={{ width: totalMs * pxPerMs }}
         onPointerDown={(e) => {
-          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          setPlayhead(Math.max(0, (e.clientX - rect.left) / pxPerMs));
+          // drag the ruler to scrub, not just click — OpenCut's ruler
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          rulerScrubRef.current = true;
+          seekFromRuler(e);
         }}
+        onPointerMove={(e) => rulerScrubRef.current && seekFromRuler(e)}
+        onPointerUp={() => (rulerScrubRef.current = false)}
       >
         {Array.from({ length: Math.ceil(totalMs / 1000) + 1 }, (_, s) => (
           <span key={s} className="absolute top-1 text-[10px] text-ink-faint"
@@ -1097,6 +1226,10 @@ export default function EditorView({ openId }: { openId?: string | null }) {
               className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
           </div>
         ))}
+        {snapLine !== null && dragRef.current && (
+          <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-lime-400/70"
+            style={{ left: snapLine * pxPerMs }} />
+        )}
         <div className="pointer-events-none absolute inset-y-0 w-px bg-emerald-400"
           style={{ left: playhead * pxPerMs }} />
       </div>
@@ -1105,9 +1238,10 @@ export default function EditorView({ openId }: { openId?: string | null }) {
 
   const hintStrip = (
     <p className="text-[11px] text-ink-faint">
-      space/K play · J/L ±1s · ←/→ step (shift jump) · S split · Q/W trim to playhead ·
-      del delete (shift = ripple) · ctrl+C/V copy/paste · ctrl+A all · ctrl+D duplicate ·
-      ctrl+Z/Y undo/redo · N snap · shift-click multi-select · esc deselect
+      space/K play · J/L ±1s · ←/→ frame (shift 1s) · drag ruler to scrub ·
+      ctrl+scroll zoom · S split · Q/W trim to playhead · del delete (shift = ripple) ·
+      ctrl+C/V copy/paste at playhead · ctrl+A all · ctrl+D duplicate · ctrl+Z/Y undo/redo ·
+      N snap · shift-click multi-select · esc deselect
     </p>
   );
 
