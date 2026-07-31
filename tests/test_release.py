@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_release_workflow_triggers_on_version_tags():
     text = (ROOT / ".github" / "workflows" / "release.yml").read_text()
     assert 'tags: ["v*"]' in text
+    assert "workflow_dispatch" in text
+    # the branch-push path: a "release:" commit cuts a release, so remote
+    # sessions that cannot push tags can still ship one
+    assert "startsWith(github.event.head_commit.message, 'release:')" in text
     assert "contents: write" in text
     assert "scripts/make_release.sh" in text
     assert "scripts/release_notes.py" in text

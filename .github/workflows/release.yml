@@ -1,16 +1,18 @@
 name: Release
 
-# One release per big milestone: push a v* tag and this packages the
-# macOS + Windows bundles (prebuilt panel included — no Node needed by
-# users) and publishes a GitHub Release with notes from the milestone log.
+# One release per big milestone. Three ways to cut one — all end in the
+# same packaged GitHub Release (macOS + Windows bundles, checksums, notes
+# from the milestone log):
 #
-#   git tag v0.29.0 && git push origin v0.29.0
-#
-# Or run it manually (Actions -> Release -> Run workflow) with the version
-# input — the release step then creates the tag at the chosen ref itself.
+#   1. git tag v0.29.0 && git push origin v0.29.0
+#   2. Actions -> Release -> Run workflow, with the version input
+#   3. commit a VERSION bump with message "release: v0.29.0" and push
+#      (the path available to remote sessions that cannot push tags —
+#      the release step creates the tag at that commit itself)
 
 on:
   push:
+    branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -18,17 +20,31 @@ on:
         description: "Release tag, e.g. v0.29.0"
         required: true
 
-env:
-  VERSION: ${{ inputs.version || github.ref_name }}
-
 permissions:
   contents: write
 
 jobs:
   release:
+    if: >-
+      github.ref_type == 'tag' ||
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.head_commit.message, 'release:')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            V="${{ inputs.version }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME}"
+          else
+            V="$(cat VERSION)"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "releasing $V"
 
       - uses: actions/setup-node@v4
         with:
@@ -43,7 +59,7 @@ jobs:
           npm run build
 
       - name: Package platform bundles
-        run: bash scripts/make_release.sh "${VERSION}"
+        run: bash scripts/make_release.sh "${{ steps.version.outputs.version }}"
 
       - name: Release notes from the milestone log
         run: python3 scripts/release_notes.py > dist-release/NOTES.md
@@ -51,8 +67,8 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.version || github.ref_name }}
-          name: Video Studio ${{ inputs.version || github.ref_name }}
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Video Studio ${{ steps.version.outputs.version }}
           body_path: dist-release/NOTES.md
           files: |
             dist-release/*.zip

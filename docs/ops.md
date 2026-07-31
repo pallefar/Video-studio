@@ -113,11 +113,18 @@ setting ⇒ add it to both files or CI fails.
 
 ## Releases
 
-One release per big milestone. Cutting one is two commands:
+One release per big milestone, version `v0.<milestone>.0`. Three ways to
+cut one (all equivalent):
 
 ```bash
-git tag v0.<milestone>.0        # e.g. v0.29.0 after M29
-git push origin v0.<milestone>.0
+# 1. tag push
+git tag v0.29.0 && git push origin v0.29.0
+
+# 2. GitHub UI: Actions -> Release -> Run workflow (version input)
+
+# 3. release commit — for environments that can push branches but not tags:
+echo v0.29.0 > VERSION
+git commit -am "release: v0.29.0" && git push
 ```
 
 `.github/workflows/release.yml` then builds the panel, runs
