@@ -227,3 +227,140 @@ def test_publish_route_enqueues_stage(client, session, voice, loop, dispatcher):
     assert func_path == "worker_cpu.stages.publish_stage"
     assert args == (job["id"],)
     assert job_key == f"{job['id']}-publish"
+
+# --- asset publish (Phase C): timeline/storyboard exports to YouTube ---------
+
+
+from schema.models import Asset, AssetOrigin  # noqa: E402
+
+
+@pytest.fixture()
+def asset_setup(engine, monkeypatch):
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+    with mock_aws():
+        store = ObjectStore(Settings(s3_endpoint="", s3_bucket="publish-asset"))
+        store.ensure_bucket()
+        monkeypatch.setattr(cpu_stages, "ObjectStore", lambda: store)
+        uri = store.put_bytes("renders/x/final.mp4", b"render-bytes")
+        with Session(engine) as session:
+            asset = Asset(origin=AssetOrigin.generated, uri=uri,
+                          caption="Export - Launch teaser",
+                          has_identifiable_people=False, approved=True)
+            session.add(asset)
+            session.commit()
+            asset_id = str(asset.id)
+        yield {"engine": engine, "asset_id": asset_id, "store": store}
+
+
+def _asset_record(engine, asset_id) -> PublishRecord | None:
+    with Session(engine) as session:
+        return session.exec(
+            select(PublishRecord).where(PublishRecord.asset_id == uuid.UUID(asset_id))
+        ).first()
+
+
+def test_publish_asset_route_writes_c4_record_and_enqueues(client, session, dispatcher):
+    asset = Asset(origin=AssetOrigin.generated, uri="s3://b/final.mp4",
+                  caption="export", has_identifiable_people=False, approved=True)
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+
+    response = client.post(
+        f"/assets/{asset.id}/publish",
+        json={"reviewed_by": "karsten", "altered_content": True},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["asset_id"] == str(asset.id)
+    assert body["job_id"] is None
+    queue, func, args, _ = dispatcher.calls[-1]
+    assert (queue, func) == (QUEUE_CPU, "worker_cpu.stages.publish_asset_stage")
+    assert args == (str(asset.id),)
+
+
+def test_publish_asset_refuses_non_video(client, session):
+    asset = Asset(origin=AssetOrigin.generated, uri="s3://b/still.png",
+                  caption="image", has_identifiable_people=False, approved=True)
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+    response = client.post(
+        f"/assets/{asset.id}/publish",
+        json={"reviewed_by": "karsten", "altered_content": True},
+    )
+    assert response.status_code == 422
+
+
+def test_publish_asset_c2_disclosure_cannot_be_false(client, session):
+    asset = Asset(origin=AssetOrigin.generated, uri="s3://b/final.mp4",
+                  caption="x", has_identifiable_people=False, approved=True)
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+    response = client.post(
+        f"/assets/{asset.id}/publish",
+        json={"reviewed_by": "karsten", "altered_content": False},
+    )
+    assert response.status_code == 422
+
+
+def test_publish_asset_stage_uploads_and_stamps_record(asset_setup, monkeypatch):
+    engine, asset_id = asset_setup["engine"], asset_setup["asset_id"]
+    with Session(engine) as session:
+        session.add(PublishRecord(asset_id=uuid.UUID(asset_id), reviewed_by="karsten"))
+        session.commit()
+    fake = FakeYouTube()
+    monkeypatch.setattr(cpu_stages, "_youtube_client", fake)
+
+    cpu_stages.publish_asset_stage(asset_id)
+
+    record = _asset_record(engine, asset_id)
+    assert record.youtube_id == "yt-123"
+    assert record.published_at is not None
+    assert fake.calls[0][1] == "Export - Launch teaser"  # caption becomes the title
+
+    # idempotent: a second run never re-uploads
+    cpu_stages.publish_asset_stage(asset_id)
+    assert len(fake.calls) == 1
+
+
+def test_publish_asset_stage_refuses_without_c4_record(asset_setup, monkeypatch):
+    fake = FakeYouTube()
+    monkeypatch.setattr(cpu_stages, "_youtube_client", fake)
+    with pytest.raises(ValueError, match="provenance"):
+        cpu_stages.publish_asset_stage(asset_setup["asset_id"])
+    assert fake.calls == []
+
+
+def test_publish_asset_quota_parks_for_next_window(asset_setup, monkeypatch):
+    engine, asset_id = asset_setup["engine"], asset_setup["asset_id"]
+    with Session(engine) as session:
+        session.add(PublishRecord(asset_id=uuid.UUID(asset_id), reviewed_by="karsten"))
+        session.commit()
+    fake = FakeYouTube(error=QuotaExceededError())
+    monkeypatch.setattr(cpu_stages, "_youtube_client", fake)
+
+    cpu_stages.publish_asset_stage(asset_id)  # no raise — parked
+
+    record = _asset_record(engine, asset_id)
+    assert record.youtube_id is None  # pending; re-POST re-enqueues
+
+
+def test_republish_pending_record_reenqueues_not_409(client, session, dispatcher):
+    asset = Asset(origin=AssetOrigin.generated, uri="s3://b/final.mp4",
+                  caption="x", has_identifiable_people=False, approved=True)
+    session.add(asset)
+    session.commit()
+    session.refresh(asset)
+    body = {"reviewed_by": "karsten", "altered_content": True}
+    assert client.post(f"/assets/{asset.id}/publish", json=body).status_code == 201
+    assert client.post(f"/assets/{asset.id}/publish", json=body).status_code == 201
+    # one record, two enqueues
+    assert len([c for c in dispatcher.calls if c[1] == "worker_cpu.stages.publish_asset_stage"]) == 2
+    with Session(session.get_bind()) as check:
+        records = check.exec(
+            select(PublishRecord).where(PublishRecord.asset_id == asset.id)
+        ).all()
+    assert len(records) == 1

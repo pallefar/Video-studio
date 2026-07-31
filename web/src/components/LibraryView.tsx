@@ -271,6 +271,34 @@ export default function LibraryView() {
                   >
                     Upscale
                   </button>
+                  {["mp4", "mov", "webm", "mkv"].includes(
+                    asset.uri.split(".").pop()?.toLowerCase() ?? "",
+                  ) && (
+                    <button
+                      onClick={() => {
+                        const reviewer = window.prompt(
+                          "C5 — publishing requires human review. Uploads always land PRIVATE on YouTube. Who reviewed this render?",
+                        );
+                        if (!reviewer?.trim()) return;
+                        fetch(`/assets/${asset.id}/publish`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ reviewed_by: reviewer.trim(), altered_content: true }),
+                        }).then(async (r) =>
+                          toast(
+                            r.ok
+                              ? "Publish queued — the upload lands private"
+                              : ((await r.json()).detail ?? "Publish failed"),
+                            r.ok ? "success" : "error",
+                          ),
+                        );
+                      }}
+                      className="mr-2 rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
+                      title="Upload to YouTube — always private (C5), disclosure flag always set (C2)"
+                    >
+                      Publish
+                    </button>
+                  )}
                   <button
                     onClick={() => act(asset.id!, "approve")}
                     className="mr-2 rounded bg-accent-soft px-3 py-1 text-xs text-accent hover:bg-accent-soft2"

@@ -116,7 +116,8 @@ export interface PublishRecordRead {
   altered_content?: boolean;
   reviewed_by: string;
   id: string;
-  job_id: string;
+  job_id?: string | null;
+  asset_id?: string | null;
   youtube_id?: string | null;
   published_at?: string | null;
   created_at: string;

@@ -325,10 +325,19 @@ class PublishRecordBase(SQLModel):
 
 
 class PublishRecord(PublishRecordBase, table=True):
+    """C4 provenance. Exactly one subject: an avatar RenderJob (the M6 flow)
+    OR a library asset (timeline/storyboard exports) — enforced by a DB
+    check constraint (migration 0013) and the publish routes."""
+
     __tablename__ = "publish_records"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    job_id: uuid.UUID = Field(foreign_key="render_jobs.id", nullable=False, unique=True)
+    job_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="render_jobs.id", nullable=True, unique=True
+    )
+    asset_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="assets.id", nullable=True, unique=True
+    )
     youtube_id: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
@@ -340,7 +349,8 @@ class PublishRecordCreate(PublishRecordBase):
 
 class PublishRecordRead(PublishRecordBase):
     id: uuid.UUID
-    job_id: uuid.UUID
+    job_id: Optional[uuid.UUID] = None
+    asset_id: Optional[uuid.UUID] = None
     youtube_id: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: datetime

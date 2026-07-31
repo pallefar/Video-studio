@@ -531,6 +531,71 @@ def publish_stage(job_id: str) -> None:
         log.info("publish_done", job_id=job_id, youtube_id=result.video_id)
 
 
+@timed_stage("publish")
+def publish_asset_stage(asset_id: str) -> None:
+    """Publish a library video asset (timeline/storyboard exports). Same
+    invariants as publish_stage: private always (C5), synthetic-media
+    disclosure always (C2), provenance record required (C4), quota
+    exhaustion parks for the next window instead of failing."""
+    import tempfile
+    import time
+    from pathlib import Path
+
+    from sqlmodel import select
+
+    from schema.models import PublishRecord, utcnow
+    from worker_cpu.publish import BACKOFF_BASE_S, UPLOAD_MAX_ATTEMPTS, QuotaExceededError
+
+    client = get_youtube_client()
+    if client is None:
+        log.warning("publish_waiting_for_oauth", asset_id=asset_id)
+        return
+
+    with open_session() as session:
+        asset = session.get(Asset, uuid.UUID(asset_id))
+        if asset is None:
+            raise ValueError(f"asset {asset_id} not found")
+        record = session.exec(
+            select(PublishRecord).where(PublishRecord.asset_id == asset.id)
+        ).first()
+        if record is None:  # C4: no provenance record, no upload — ever
+            raise ValueError(f"asset {asset_id}: publish without provenance record")
+        if record.youtube_id:
+            log.info("publish_skip_already_uploaded", asset_id=asset_id,
+                     youtube_id=record.youtube_id)
+            return
+
+        store = ObjectStore()
+        _, key = store.parse_uri(asset.uri)
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / "final.mp4"
+            store.get_file(key, local)
+
+            title = asset.caption or f"Studio export {asset_id[:8]}"
+            description = "Synthetic media — created with an AI video studio."
+            last_error: Exception | None = None
+            for attempt in range(UPLOAD_MAX_ATTEMPTS):
+                try:
+                    result = client.upload(local, title, description)
+                    break
+                except QuotaExceededError:
+                    log.warning("publish_quota_exhausted", asset_id=asset_id)
+                    return  # next quota window — record stays pending
+                except Exception as exc:
+                    last_error = exc
+                    log.warning("publish_retry", asset_id=asset_id, attempt=attempt,
+                                error=str(exc))
+                    time.sleep(BACKOFF_BASE_S * (2**attempt))
+            else:
+                raise RuntimeError(f"publish failed for asset {asset_id}: {last_error}")
+
+        record.youtube_id = result.video_id
+        record.published_at = utcnow()
+        session.add(record)
+        session.commit()
+        log.info("publish_done", asset_id=asset_id, youtube_id=result.video_id)
+
+
 @timed_stage("generation")
 def generation_stage_api(generation_id: str) -> None:
     """API-provider generation: a network job. Deliberately no GPU lock —
