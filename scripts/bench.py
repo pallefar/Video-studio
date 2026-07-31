@@ -59,9 +59,39 @@ def smoke() -> int:
 
 
 def bench_loop(loop_id: str) -> int:
-    _require_gpu()
-    print(f"bench --loop {loop_id}: not implemented until M2", file=sys.stderr)
-    return 1
+    """M2 acceptance: the second render against a cached loop must be
+    measurably (>= 40%) faster than the first. Measured from the metrics
+    table — run two renders against the loop (first cold, second cached),
+    then this compares the two most recent lipsync stage durations for it.
+    CPU-only logic: usable the moment the workstation has produced runs."""
+    from sqlmodel import Session, select
+
+    from pipeline_core.db import get_engine
+    from schema.models import Metric
+
+    with Session(get_engine()) as session:
+        rows = session.exec(
+            select(Metric)
+            .where(Metric.stage == "lipsync", Metric.ref.contains(loop_id))
+            .order_by(Metric.created_at.desc())
+            .limit(2)
+        ).all()
+    if len(rows) < 2:
+        print(
+            f"bench --loop {loop_id}: need two lipsync runs recorded for this loop "
+            f"(found {len(rows)}) — render the same job twice first",
+            file=sys.stderr,
+        )
+        return 1
+    cached, cold = rows[0].duration_ms, rows[1].duration_ms
+    speedup = 1 - (cached / cold) if cold else 0.0
+    print(f"cold run:   {cold / 1000:.1f}s")
+    print(f"cached run: {cached / 1000:.1f}s")
+    print(f"speedup:    {speedup:.0%} (target >= 40%)")
+    if speedup < 0.40:
+        print("FAIL: latent cache under target — M2 acceptance not met", file=sys.stderr)
+        return 1
+    return 0
 
 
 def main() -> int:

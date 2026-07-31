@@ -191,7 +191,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 - [x] Audio infrastructure (landed ahead of the models): timeline audio tracks (`AudioClip` with gain + per-clip duck flag), shot audio forms the voice bus in exports, music beds mix under it with sidechain ducking, `POST /assets/upload` brings your own music/footage in, and every worker stage records its duration to the metrics table (`GET /metrics`)
 - [x] ACE-Step music-bed generation into the library (shared lane) *(`POST /music/generate`; ModelSpec lane routing — shared residents ride the render queue under the render holder, never the wan lock; asset lands with its Apache-2.0 licence recorded; the real ACE-Step load is the workstation task like every local model)*
 - [x] Emotion controls on Chatterbox TTS segments (Speak-style) *(data-driven preset registry in `pipeline_core/emotions.py` mapping to exaggeration/cfg_weight; `Segment.emotion` pinned next to the seed; per-segment re-render endpoint carries emotion/reseed; tts stage passes delivery params to the engine — audible once M3's real Chatterbox lands)*
-- [ ] Qwen3.5-4B (CPU) prompt enhancement for Wan prompts; Florence-2 auto-captioning of assets (feeds the M8 resolver) *(enhancement plumbing landed: `enhance=true` records raw+enhanced via `pipeline_core/enhance.py` — Qwen GGUF via the `[enhance]` extra + `QWEN_MODEL_PATH`, deterministic heuristic until then; Florence-2 captioning still open)*
+- [x] Qwen3.5-4B (CPU) prompt enhancement for Wan prompts; Florence-2 auto-captioning of assets (feeds the M8 resolver) *(enhancement: `enhance=true` records raw+enhanced via `pipeline_core/enhance.py`, heuristic now applies the M27 structure frame, Qwen GGUF via `[enhance]` + `QWEN_MODEL_PATH`; captioning landed as M24's Florence-2 lane — the real weight loads are the workstation install)*
 
 **Accept:** music generation lands as licensed-clean library asset; a prompt-enhanced generation records both raw and enhanced prompts ✅ (2026-07-29, `tests/test_music_and_enhance.py`)
 
@@ -274,3 +274,22 @@ alone for social posting.
 - [x] `deploy/systemd/` (api, worker-cpu, worker-gpu, worker-wan, comfyui) + `deploy/launchd/` Mac dev-mode units — the wan queue finally has a dedicated runner (`worker_gpu/run_wan.py`, landed with Phase A); GPU units are single-instance by construction, never templated
 
 **Accept:** `pytest tests/test_ops.py` — env drift both directions, sync round-trip incl. incremental/no-clobber semantics, unit coverage per lane ✅ (2026-07-31; backup+restore drill run against the live stack)
+
+## M26 — Timeline completion, reliability, publish-everything, web tests
+
+- [x] **Timeline feature completion**: per-clip audio fades (`fade_in_ms`/`fade_out_ms`, afade in the compiler's music chain, sliders + waveform ramps in the editor); `transition_ms` exposed as a Document properties section with boundary markers; **overlay video track rendered** — `video_tracks[1]` compiles as top-right PiP (1/3 width, under texts, always under C1; a generated overlay forces the watermark like a generated shot) with a dedicated editor lane, PiP add button and live preview compositing; filmstrip clip thumbnails from the M14 sprites; marquee rubber-band selection across all four lanes
+- [x] **Reliability & control**: generation retry (failed→queued) / cancel (queued→cancelled, honoured by the worker), `/stats` health block (RQ worker liveness + queue depths, degrades with redis down), booleans-only `GET /config`, Settings tab (config checklist, worker chips with stale detection, DEV_ENGINES banner), dependency-free toasts, Library Caption button
+- [x] **Publish everything**: migration 0013 lets `PublishRecord` reference an asset (exactly-one-subject check constraint); `POST /assets/{id}/publish` + `publish_asset_stage` reuse the M6 uploader — C4 record first, C5 review required, private always, quota parks; Library Publish action; MCP still publish-tool-free
+- [x] **Frontend test harness**: pure timeline logic extracted to `web/src/lib/timelineOps.ts`; vitest with 21 unit cases; CI web job runs `npm test` + full build
+
+**Accept:** `pytest tests/test_render_compiler.py tests/test_reliability.py tests/test_publish_worker.py tests/test_timeline_editor.py` + `npm test` ✅ (2026-07-31; PiP visibility proven on a real render, browser pass over fades/marquee/Settings)
+
+## M27 — Prompt intelligence: catalog + reverse prompt engineering
+
+- [x] `pipeline_core/prompts.py`: 30-entry curated prompt catalog as data — Wan structure frames with `{subject}` slots, camera language, motion qualifiers, lighting, style/film-stock, composition, standard video/image negatives, ACE-Step music tags; every technique entry carries its source attribution (wan27/VEED/InstaSD/MimicPC guides, roblaughter style-reference, SD modifier collections), audited by tests
+- [x] `SavedPrompt` entity (alembic 0014) + `/prompts` CRUD — the user's prompt library (manual | catalog | reverse)
+- [x] Reverse prompt engineering: `POST /prompts/reverse/{asset_id}` — Florence-2 caption (M24) → structure-framed prompt + kind-appropriate standard negative; `?save=true` files it; Library "→ Prompt" action
+- [x] Enhancer upgrade: the heuristic applies the structure frame when a prompt lacks camera language — `enhance=true` produces Wan-shaped prompts even without Qwen weights
+- [x] Prompts tab (searchable catalog, category chips, copy/save, source links, My prompts) + MCP tools (`prompt_catalog`, `reverse_prompt`, `save_prompt`, `list_saved_prompts`)
+
+**Accept:** `pytest tests/test_prompts.py` — registry audit incl. attribution, CRUD round-trip, reverse-prompt paths incl. the placeholder-caption refusal, enhancer frame cases, MCP exposure ✅ (2026-07-31)
