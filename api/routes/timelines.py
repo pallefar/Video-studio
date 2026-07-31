@@ -163,6 +163,19 @@ async def timeline_media(
     return urls
 
 
+@router.get("/timelines/{timeline_id}/export/status")
+async def timeline_export_status(
+    timeline_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+):
+    _get_or_404(session, timeline_id)
+    key = f"renders/{timeline_id}/final.mp4"
+    if store.exists(key):
+        return {"ready": True, "url": store.presign_get(key)}
+    return {"ready": False, "url": None}
+
+
 @router.post("/timelines/{timeline_id}/export", status_code=202)
 async def export_timeline(
     timeline_id: uuid.UUID,
