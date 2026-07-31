@@ -157,6 +157,39 @@ def test_media_endpoint_presigns_clip_assets(client, session):
         assert asset.uri.split("/")[-1] in media[str(asset.id)]
 
 
+def test_media_endpoint_includes_audio_track_assets(client, session):
+    """C2 (editor v2): the transport plays music beds too, so audio-track
+    assets must be presigned alongside the video clips."""
+    with mock_aws():
+        store = ObjectStore(Settings(s3_endpoint="", s3_bucket="avatar-pipeline"))
+        store.ensure_bucket()
+        client.app.dependency_overrides[get_object_store] = lambda: store
+        video = _seed_asset(session)
+        music = Asset(origin=AssetOrigin.own, uri=f"s3://avatar-pipeline/{uuid.uuid4()}.wav",
+                      caption="bed", has_identifiable_people=False, approved=True)
+        session.add(music)
+        session.commit()
+        session.refresh(music)
+
+        timeline = client.post("/timelines", json={"title": "with bed"}).json()
+        doc = {
+            "video_tracks": [[_clip(0, 0, 1000, asset_id=str(video.id))]],
+            "audio_tracks": [[{
+                "id": "a1", "asset_id": str(music.id), "start_ms": 0,
+                "in_ms": 0, "out_ms": 4000, "gain": 0.8, "duck": True,
+            }]],
+        }
+        response = client.put(
+            f"/timelines/{timeline['id']}", json={"doc": doc, "base_version": 1}
+        )
+        assert response.status_code == 200, response.text
+
+        media = client.get(f"/timelines/{timeline['id']}/media").json()
+        assert str(video.id) in media
+        assert str(music.id) in media
+        assert music.uri.split("/")[-1] in media[str(music.id)]
+
+
 # --- Export with trims and text overlays ------------------------------------
 
 

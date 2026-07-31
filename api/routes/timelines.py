@@ -138,23 +138,28 @@ async def timeline_media(
 ):
     """Presigned playback URLs per asset so the editor previews without any
     further server round-trips. Prefers the 720p ingest proxy (M14) when one
-    exists — cheaper decode, always browser-safe."""
+    exists — cheaper decode, always browser-safe. Audio-track assets are
+    included so the editor's transport can play music beds too."""
     timeline = _get_or_404(session, timeline_id)
     urls: dict[str, str] = {}
-    for track in timeline.doc.video_tracks:
-        for clip in track:
-            if clip.asset_id in urls:
-                continue
-            asset = session.get(Asset, uuid.UUID(clip.asset_id))
-            if asset is None:
-                continue
-            proxy_key = f"assets/derived/{clip.asset_id}/proxy.mp4"
-            if store.exists(proxy_key):
-                urls[clip.asset_id] = store.presign_get(proxy_key)
-                continue
-            bucket, key = ObjectStore.parse_uri(asset.uri)
-            if bucket == store.bucket:
-                urls[clip.asset_id] = store.presign_get(key)
+    clips = [
+        clip
+        for track in [*timeline.doc.video_tracks, *timeline.doc.audio_tracks]
+        for clip in track
+    ]
+    for clip in clips:
+        if clip.asset_id in urls:
+            continue
+        asset = session.get(Asset, uuid.UUID(clip.asset_id))
+        if asset is None:
+            continue
+        proxy_key = f"assets/derived/{clip.asset_id}/proxy.mp4"
+        if store.exists(proxy_key):
+            urls[clip.asset_id] = store.presign_get(proxy_key)
+            continue
+        bucket, key = ObjectStore.parse_uri(asset.uri)
+        if bucket == store.bucket:
+            urls[clip.asset_id] = store.presign_get(key)
     return urls
 
 

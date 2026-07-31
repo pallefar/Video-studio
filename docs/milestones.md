@@ -243,3 +243,12 @@ alone for social posting.
 - [x] Dependency-free SVG charts (`web/src/components/charts.tsx`, currentColor so both themes work): Dashboard "Stage durations" trend cards per stage — last run vs median with a `slow` chip when last > 1.5× median — **the thermal-throttle view the metrics table exists for** (pipeline-spec §5)
 
 **Accept:** `pytest tests/test_dashboard.py tests/test_providers.py` — cost rollups incl. the empty-DB and out-of-window cases; billed-over-estimate precedence ✅ (2026-07-31)
+
+## M23 — Editor v2: transport, audio lane, hover-scrub
+
+- [x] Transport: play/pause (button + spacebar), rAF playhead advance on real-time delta; playing clips free-run the decoder and only correct >250 ms drift — no per-frame seeking; canvas sized by `doc.format` (16:9 / 9:16)
+- [x] Audio lane: `doc.audio_tracks[0]` rendered and editable (add-from-library picker, move/trim via the shared drag machinery, gain 0–4 + duck toggle feeding the M16 sidechain graph); waveform strip from M14 `peaks.json` via the shared `Bars` chart; beds play under the transport (preview volume clamped at 1× — gain >1 applies at export)
+- [x] Hover-scrub: `sprite.vtt` `#xywh` cues + `sprite.jpg` background-position floating thumb above the pointer — first consumer of the M14 sprite derivatives
+- [x] Server: `GET /timelines/{id}/media` presigns audio-track assets alongside video clips
+
+**Accept:** `pytest tests/test_timeline_editor.py` incl. audio-media presigning ✅ (2026-07-31; playback/waveform/scrub verified in-browser against the live stack — note: Playwright's OSS Chromium lacks H.264, real Chrome plays the ingest proxies natively)
