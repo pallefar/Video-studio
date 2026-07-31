@@ -250,6 +250,7 @@ alone for social posting.
 - [x] Audio lane: `doc.audio_tracks[0]` rendered and editable (add-from-library picker, move/trim via the shared drag machinery, gain 0–4 + duck toggle feeding the M16 sidechain graph); waveform strip from M14 `peaks.json` via the shared `Bars` chart; beds play under the transport (preview volume clamped at 1× — gain >1 applies at export)
 - [x] Hover-scrub: `sprite.vtt` `#xywh` cues + `sprite.jpg` background-position floating thumb above the pointer — first consumer of the M14 sprite derivatives
 - [x] Server: `GET /timelines/{id}/media` presigns audio-track assets alongside video clips
+- [x] **mediabunny (MPL-2.0) landed as the editor decode engine** — the licence-clean answer to "add Remotion" (Remotion/react-video-editor stay rejected, roadmap §6): `web/src/lib/frameSource.ts` wraps `Input`/`UrlSource`/`CanvasSink` for frame-exact WebCodecs decode of paused/scrub frames over the ingest proxies, dynamically imported so the demuxers live in a lazy chunk; `<video>` free-run stays for real-time playback and is the automatic fallback when the codec/browser can't decode
 
 **Accept:** `pytest tests/test_timeline_editor.py` incl. audio-media presigning ✅ (2026-07-31; playback/waveform/scrub verified in-browser against the live stack — note: Playwright's OSS Chromium lacks H.264, real Chrome plays the ingest proxies natively)
 

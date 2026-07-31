@@ -7,6 +7,7 @@ import type {
   TimelineDocRead,
   TimelineDocument,
 } from "../types/schema";
+import { FrameSource } from "../lib/frameSource";
 import { Bars } from "./charts";
 
 const PX_PER_MS = 0.06; // base zoom: 60px per second
@@ -95,10 +96,20 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videosRef = useRef<Record<string, HTMLVideoElement>>({});
   const audiosRef = useRef<Record<string, HTMLAudioElement>>({});
+  const framesRef = useRef<Record<string, FrameSource>>({});
+  const drawSeqRef = useRef(0);
 
   const pxPerMs = PX_PER_MS * zoom;
 
+  const disposeFrameSources = useCallback(() => {
+    for (const source of Object.values(framesRef.current)) source.dispose();
+    framesRef.current = {};
+  }, []);
+
+  useEffect(() => disposeFrameSources, [disposeFrameSources]);
+
   const load = useCallback((id: string) => {
+    disposeFrameSources();
     fetch(`/timelines/${id}`)
       .then((r) => r.json())
       .then((t: TimelineDocRead) => {
@@ -110,7 +121,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         setPlayhead(0);
       });
     fetch(`/timelines/${id}/media`).then((r) => r.json()).then(setMedia);
-  }, []);
+  }, [disposeFrameSources]);
 
   const refreshList = useCallback(() => {
     fetch("/timelines").then((r) => r.json()).then(setTimelines);
@@ -416,12 +427,25 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         draw();
       } else {
         if (!video.paused) video.pause();
-        if (Math.abs(video.currentTime - target) > 0.04) {
-          video.currentTime = target;
-          video.onseeked = draw;
-        } else {
-          draw();
+        // Paused/scrub: frame-exact decode via mediabunny + WebCodecs; the
+        // <video> seek path is the fallback when the codec/browser can't.
+        let source = framesRef.current[active.asset_id];
+        if (!source) {
+          source = new FrameSource(media[active.asset_id], canvas.width, canvas.height);
+          framesRef.current[active.asset_id] = source;
         }
+        const seq = ++drawSeqRef.current;
+        source.draw(ctx, target, canvas.width, canvas.height).then((exact) => {
+          if (seq !== drawSeqRef.current) return; // a newer draw superseded us
+          if (exact) {
+            drawOverlays();
+          } else if (Math.abs(video.currentTime - target) > 0.04) {
+            video.currentTime = target;
+            video.onseeked = draw;
+          } else {
+            draw();
+          }
+        });
       }
     } else {
       drawOverlays();
