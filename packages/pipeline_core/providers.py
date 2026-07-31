@@ -42,6 +42,9 @@ class ModelSpec:
     provider_class: str
     notes: str = ""
     lane: str = LANE_WAN
+    # Estimated $ per generation: 0.0 = local/free, None = unpriced. The
+    # single-user replacement for Higgsfield's credit system (roadmap §3).
+    est_cost: float | None = None
 
 
 @dataclass
@@ -84,28 +87,28 @@ class LocalWanProvider:
         video = frozenset({GenerationKind.text_to_video, GenerationKind.image_to_video})
         image = frozenset({GenerationKind.image})
         return [
-            ModelSpec(self.name, "wan2.2-t2v", frozenset({GenerationKind.text_to_video}), CLASS_LOCAL),
-            ModelSpec(self.name, "wan2.2-i2v", frozenset({GenerationKind.image_to_video}), CLASS_LOCAL),
-            ModelSpec(self.name, "wan2.2-fun-camera", video, CLASS_LOCAL, "camera presets, M11"),
+            ModelSpec(self.name, "wan2.2-t2v", frozenset({GenerationKind.text_to_video}), CLASS_LOCAL, est_cost=0.0),
+            ModelSpec(self.name, "wan2.2-i2v", frozenset({GenerationKind.image_to_video}), CLASS_LOCAL, est_cost=0.0),
+            ModelSpec(self.name, "wan2.2-fun-camera", video, CLASS_LOCAL, "camera presets, M11", est_cost=0.0),
             # Image studio roster (M12, roadmap-v2 §2) — all commercially clean.
-            ModelSpec(self.name, "z-image-turbo", image, CLASS_LOCAL, "image daily driver, M12"),
-            ModelSpec(self.name, "qwen-image", image, CLASS_LOCAL, "text-heavy thumbnails, M12"),
-            ModelSpec(self.name, "sdxl", image, CLASS_LOCAL, "style LoRAs + identity training, M12"),
+            ModelSpec(self.name, "z-image-turbo", image, CLASS_LOCAL, "image daily driver, M12", est_cost=0.0),
+            ModelSpec(self.name, "qwen-image", image, CLASS_LOCAL, "text-heavy thumbnails, M12", est_cost=0.0),
+            ModelSpec(self.name, "sdxl", image, CLASS_LOCAL, "style LoRAs + identity training, M12", est_cost=0.0),
             # VFX & finishing lane (M13). FILM is the interpolation pick —
             # RIFE stays out per the licence register's training-data caveat.
             ModelSpec(self.name, "wan2.2-vace-fun", frozenset({GenerationKind.video_to_video}),
-                      CLASS_LOCAL, "effect presets, M13"),
+                      CLASS_LOCAL, "effect presets, M13", est_cost=0.0),
             ModelSpec(self.name, "wan2.1-vace-1.3b", frozenset({GenerationKind.video_to_video}),
-                      CLASS_LOCAL, "fast effect preview, M13"),
+                      CLASS_LOCAL, "fast effect preview, M13", est_cost=0.0),
             ModelSpec(self.name, "seedvr2-3b", frozenset({GenerationKind.upscale}),
-                      CLASS_LOCAL, "hero-shot upscale, M13"),
+                      CLASS_LOCAL, "hero-shot upscale, M13", est_cost=0.0),
             ModelSpec(self.name, "real-esrgan", frozenset({GenerationKind.upscale}),
-                      CLASS_LOCAL, "cheap upscale lane, M13", lane=LANE_SHARED),
+                      CLASS_LOCAL, "cheap upscale lane, M13", lane=LANE_SHARED, est_cost=0.0),
             ModelSpec(self.name, "film", frozenset({GenerationKind.upscale}),
-                      CLASS_LOCAL, "frame interpolation, M13", lane=LANE_SHARED),
+                      CLASS_LOCAL, "frame interpolation, M13", lane=LANE_SHARED, est_cost=0.0),
             # Audio suite (M18): ACE-Step base fits the render lane's headroom.
             ModelSpec(self.name, "ace-step", frozenset({GenerationKind.music}),
-                      CLASS_LOCAL, "music beds, M18 (Apache 2.0)", lane=LANE_SHARED),
+                      CLASS_LOCAL, "music beds, M18 (Apache 2.0)", lane=LANE_SHARED, est_cost=0.0),
         ]
 
     def generate(self, generation: Generation) -> ProviderResult:
@@ -136,13 +139,15 @@ class FalProvider:
     name = "fal"
     provider_class = CLASS_API
 
-    # Curated roster; grows as models are vetted. Model ids are fal endpoint ids.
-    ROSTER: list[tuple[str, frozenset[GenerationKind]]] = [
-        ("fal-ai/kling-video/v2/master/text-to-video", frozenset({GenerationKind.text_to_video})),
-        ("fal-ai/kling-video/v2/master/image-to-video", frozenset({GenerationKind.image_to_video})),
-        ("fal-ai/bytedance/seedance/v1/pro", frozenset({GenerationKind.text_to_video, GenerationKind.image_to_video})),
-        ("fal-ai/minimax/hailuo-02/standard/text-to-video", frozenset({GenerationKind.text_to_video})),
-        ("fal-ai/flux/schnell", frozenset({GenerationKind.image})),
+    # Curated roster; grows as models are vetted. Model ids are fal endpoint
+    # ids; costs are flat per-generation estimates (data, revised over time —
+    # the actual billed amount wins whenever the response ever carries one).
+    ROSTER: list[tuple[str, frozenset[GenerationKind], float]] = [
+        ("fal-ai/kling-video/v2/master/text-to-video", frozenset({GenerationKind.text_to_video}), 1.40),
+        ("fal-ai/kling-video/v2/master/image-to-video", frozenset({GenerationKind.image_to_video}), 1.40),
+        ("fal-ai/bytedance/seedance/v1/pro", frozenset({GenerationKind.text_to_video, GenerationKind.image_to_video}), 0.74),
+        ("fal-ai/minimax/hailuo-02/standard/text-to-video", frozenset({GenerationKind.text_to_video}), 0.48),
+        ("fal-ai/flux/schnell", frozenset({GenerationKind.image}), 0.003),
     ]
 
     def __init__(self, api_key: str, client: Optional[httpx.Client] = None, poll_interval_s: float = 3.0):
@@ -151,7 +156,10 @@ class FalProvider:
         self._poll_interval_s = poll_interval_s
 
     def models(self) -> list[ModelSpec]:
-        return [ModelSpec(self.name, model, kinds, CLASS_API) for model, kinds in self.ROSTER]
+        return [
+            ModelSpec(self.name, model, kinds, CLASS_API, est_cost=cost)
+            for model, kinds, cost in self.ROSTER
+        ]
 
     def generate(self, generation: Generation) -> ProviderResult:
         payload = {"prompt": generation.prompt, **(generation.params or {})}
@@ -183,10 +191,12 @@ class FalProvider:
         url = media.get("url")
         if not url:
             raise RuntimeError(f"fal generation {request_id} returned no media url")
+        est = next((cost for model, _, cost in self.ROSTER if model == generation.model), None)
         return ProviderResult(
             download_url=url,
             content_type=media.get("content_type", "video/mp4"),
             external_id=request_id,
+            cost=body.get("billed_cost", est),  # billed wins over the estimate
         )
 
 

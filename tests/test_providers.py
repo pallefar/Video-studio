@@ -241,8 +241,22 @@ def test_catalog_lists_models(client, api_registry):
             "kinds": ["text_to_video"],
             "provider_class": "api",
             "notes": "",
+            "est_cost": None,
         }
     ]
+
+
+def test_catalog_prices_local_free_and_fal_estimated():
+    """B1: engine pickers show price — local models are 0.0 (free, not
+    unpriced), fal roster entries carry their per-generation estimate."""
+    registry = build_registry(Settings(fal_api_key="k"))
+    by_model = {(s.provider, s.model): s for s in registry.catalog()}
+    assert by_model[("local", "wan2.2-t2v")].est_cost == 0.0
+    assert all(
+        spec.est_cost == 0.0 for (prov, _), spec in by_model.items() if prov == "local"
+    )
+    kling = by_model[("fal", "fal-ai/kling-video/v2/master/text-to-video")]
+    assert kling.est_cost and kling.est_cost > 0
 
 
 # --- Fal adapter -----------------------------------------------------------
@@ -280,6 +294,29 @@ def test_fal_provider_submit_poll_fetch():
     result = provider.generate(generation)
     assert result.download_url == "https://fal.media/out.mp4"
     assert result.external_id == "req-9"
+    # No billed_cost in the response -> the roster estimate is recorded.
+    assert result.cost == 1.40
+
+
+def test_fal_provider_billed_cost_wins_over_estimate():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"request_id": "req-2"})
+        if request.url.path.endswith("/status"):
+            return httpx.Response(200, json={"status": "COMPLETED"})
+        return httpx.Response(
+            200,
+            json={"video": {"url": "https://fal.media/o.mp4"}, "billed_cost": 0.91},
+        )
+
+    provider = FalProvider(
+        "k", httpx.Client(transport=httpx.MockTransport(handler)), poll_interval_s=0
+    )
+    generation = Generation(
+        provider="fal", model="fal-ai/kling-video/v2/master/text-to-video",
+        kind=T2V, prompt="x",
+    )
+    assert provider.generate(generation).cost == 0.91
 
 
 def test_fal_provider_failure_raises():

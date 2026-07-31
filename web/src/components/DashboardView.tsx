@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { poll } from "../lib";
+import { Sparkline } from "./charts";
 
 interface Stats {
   assets: { total: number; approved: number; by_origin: Record<string, number> };
@@ -9,6 +10,12 @@ interface Stats {
   projects: number;
   storyboards: number;
   storage: { objects: number; bytes: number };
+  costs: {
+    total: number;
+    last_30d: number;
+    by_provider: Record<string, number>;
+    by_project: Record<string, number>;
+  };
   recent_assets: {
     id: string;
     caption: string | null;
@@ -17,6 +24,23 @@ interface Stats {
     created_at: string;
   }[];
   recent_stages: { stage: string; ref: string; duration_ms: number; created_at: string }[];
+}
+
+// Stages whose duration trend the dashboard tracks. Throughput creep on
+// these is the first thermal-throttling symptom (pipeline-spec §5).
+const TREND_STAGES = ["tts", "lipsync", "assemble", "export", "generation", "ingest"];
+
+interface MetricRow {
+  stage: string;
+  ref: string;
+  duration_ms: number;
+  created_at: string;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 const ORIGIN_ART: Record<string, string> = {
@@ -59,6 +83,7 @@ function Tile({
 export default function DashboardView({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [trends, setTrends] = useState<Record<string, MetricRow[]>>({});
   const [error, setError] = useState<string | null>(null);
 
   const refreshStats = useCallback(() => {
@@ -81,8 +106,20 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (tab: strin
       .catch(() => undefined);
   }, []);
 
+  const refreshTrends = useCallback(() => {
+    Promise.all(
+      TREND_STAGES.map((stage) =>
+        fetch(`/metrics?stage=${stage}&limit=20`)
+          .then((r) => (r.ok ? r.json() : []))
+          .then((rows: MetricRow[]) => [stage, rows] as const)
+          .catch(() => [stage, []] as const),
+      ),
+    ).then((entries) => setTrends(Object.fromEntries(entries)));
+  }, []);
+
   useEffect(() => poll(refreshStats, 5000), [refreshStats]);
   useEffect(() => poll(refreshThumbs, 600_000), [refreshThumbs]);
+  useEffect(() => poll(refreshTrends, 30_000), [refreshTrends]);
 
   if (!stats && error)
     return (
@@ -94,10 +131,13 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (tab: strin
 
   const queueDepth = (stats.generations.queued ?? 0) + (stats.generations.running ?? 0);
   const inReview = stats.jobs.review ?? 0;
+  const costs = stats.costs ?? { total: 0, last_30d: 0, by_provider: {}, by_project: {} };
+  const topProvider = Object.entries(costs.by_provider).sort((a, b) => b[1] - a[1])[0];
+  const activeTrends = TREND_STAGES.filter((stage) => (trends[stage]?.length ?? 0) >= 2);
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         <Tile
           label="Assets"
           value={stats.assets.total}
@@ -133,7 +173,61 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (tab: strin
           value={formatBytes(stats.storage.bytes)}
           detail={`${stats.storage.objects} objects`}
         />
+        <Tile
+          label="Spend 30d"
+          value={`$${costs.last_30d.toFixed(2)}`}
+          detail={
+            topProvider
+              ? `$${costs.total.toFixed(2)} total · ${topProvider[0]}`
+              : `$${costs.total.toFixed(2)} total`
+          }
+        />
       </div>
+
+      {activeTrends.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-lg font-semibold tracking-tight text-ink">
+            Stage durations
+            <span className="ml-2 text-sm font-normal text-ink-muted">
+              creep above the median is the first throttling symptom
+            </span>
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {activeTrends.map((stage) => {
+              const rows = trends[stage];
+              // /metrics returns newest-first; charts read left→right in time.
+              const durations = rows.map((r) => r.duration_ms).reverse();
+              const last = durations[durations.length - 1];
+              const med = median(durations);
+              const slow = durations.length >= 4 && last > med * 1.5;
+              return (
+                <div
+                  key={stage}
+                  className="rounded-2xl border border-edge bg-surface p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+                      {stage}
+                    </p>
+                    {slow && (
+                      <span className="chip-amber rounded px-1.5 py-0.5 text-[10px] font-semibold">
+                        slow
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xl font-bold tracking-tight">
+                    {(last / 1000).toFixed(1)}s
+                  </p>
+                  <p className="text-xs text-ink-muted">median {(med / 1000).toFixed(1)}s</p>
+                  <div className={`mt-2 ${slow ? "text-warn" : "text-accent"}`}>
+                    <Sparkline values={durations} width={140} height={26} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="mb-3 text-lg font-semibold tracking-tight text-ink">Recent renders</h2>

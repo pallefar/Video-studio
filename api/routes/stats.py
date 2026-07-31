@@ -75,6 +75,36 @@ async def studio_stats(
     session: Session = Depends(get_session),
     store: ObjectStore = Depends(get_object_store),
 ):
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)  # columns are naive UTC
+    total_cost = session.exec(
+        select(func.coalesce(func.sum(Generation.cost), 0.0))
+    ).one()
+    month_cost = session.exec(
+        select(func.coalesce(func.sum(Generation.cost), 0.0)).where(
+            Generation.created_at >= now - timedelta(days=30)
+        )
+    ).one()
+    cost_by_provider = {
+        provider: round(value, 4)
+        for provider, value in session.exec(
+            select(Generation.provider, func.sum(Generation.cost))
+            .where(Generation.cost != None)  # noqa: E711
+            .group_by(Generation.provider)
+        ).all()
+    }
+    cost_by_project = {
+        str(title): round(value, 4)
+        for title, value in session.exec(
+            select(Project.title, func.sum(Generation.cost))
+            .select_from(Generation)
+            .join(Project, Project.id == Generation.project_id)
+            .where(Generation.cost != None)  # noqa: E711
+            .group_by(Project.title)
+        ).all()
+    }
+
     recent_assets = session.exec(
         select(Asset.id, Asset.caption, Asset.origin, Asset.approved, Asset.created_at)
         .order_by(Asset.created_at.desc())
@@ -99,6 +129,12 @@ async def studio_stats(
         "projects": _count(session, Project),
         "storyboards": _count(session, Storyboard),
         "storage": _cached_usage(store),
+        "costs": {
+            "total": round(total_cost, 4),
+            "last_30d": round(month_cost, 4),
+            "by_provider": cost_by_provider,
+            "by_project": cost_by_project,
+        },
         "recent_assets": [
             {
                 "id": str(asset_id),

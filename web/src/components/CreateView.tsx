@@ -21,6 +21,7 @@ interface CatalogEntry {
   kinds: string[];
   provider_class: string;
   notes: string;
+  est_cost: number | null;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -191,6 +192,7 @@ export default function CreateView({ projectId }: { projectId?: string }) {
             {catalog.map((entry) => (
               <option key={`${entry.provider}::${entry.model}`} value={`${entry.provider}::${entry.model}`}>
                 {entry.provider} · {entry.model.split("/").pop()}
+                {entry.est_cost ? ` · $${entry.est_cost.toFixed(2)}` : ""}
               </option>
             ))}
           </select>

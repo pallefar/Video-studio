@@ -100,6 +100,7 @@ export default function ProjectsView({
   onOpenEditor?: (timelineId: string) => void;
 }) {
   const [projects, setProjects] = useState<ProjectRead[]>([]);
+  const [costs, setCosts] = useState<Record<string, number>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("assets");
   const [title, setTitle] = useState("");
@@ -107,6 +108,10 @@ export default function ProjectsView({
 
   const refresh = useCallback(() => {
     fetch("/projects").then((r) => r.json()).then(setProjects);
+    fetch("/stats")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => setCosts(s?.costs?.by_project ?? {}))
+      .catch(() => undefined);
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -148,6 +153,7 @@ export default function ProjectsView({
             {p.title}
             <span className="ml-2 text-xs opacity-60">
               {p.asset_count ?? 0} assets · {p.storyboard_count ?? 0} videos
+              {costs[p.title] ? ` · $${costs[p.title].toFixed(2)}` : ""}
             </span>
           </button>
         ))}

@@ -234,3 +234,12 @@ alone for social posting.
 - [x] `Project.kind` (video/movie/game/other, alembic 0012) organises productions; kind picker in the Projects tab
 
 **Accept:** `pytest tests/test_mcp.py` — tools drive the real app end-to-end via ASGI transport; forbidden tools cannot exist; project kinds round-trip; a game asset batch shares one seed ✅ (2026-07-30; setup guide in docs/mcp.md)
+
+## M22 — Cost tracking + observability
+
+- [x] `ModelSpec.est_cost` as data: local models 0.0 (free, distinct from unpriced), fal roster carries per-generation estimates; `billed_cost` from the provider response wins over the estimate
+- [x] `/stats` cost rollups via SQL aggregates: total, last-30d window, by-provider, by-project — coalesced to zeros on an empty DB
+- [x] Engine pickers show price (`CatalogEntry.est_cost`); Dashboard "Spend 30d" tile; per-project cost chip in the Projects switcher — the single-user replacement for Higgsfield's credit system (roadmap §3)
+- [x] Dependency-free SVG charts (`web/src/components/charts.tsx`, currentColor so both themes work): Dashboard "Stage durations" trend cards per stage — last run vs median with a `slow` chip when last > 1.5× median — **the thermal-throttle view the metrics table exists for** (pipeline-spec §5)
+
+**Accept:** `pytest tests/test_dashboard.py tests/test_providers.py` — cost rollups incl. the empty-DB and out-of-window cases; billed-over-estimate precedence ✅ (2026-07-31)

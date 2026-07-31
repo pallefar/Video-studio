@@ -11,7 +11,16 @@ from sqlmodel import Session
 from api.routes.assets import get_object_store
 from pipeline_core.settings import Settings
 from pipeline_core.storage import ObjectStore
-from schema.models import Asset, AssetOrigin, Identity, Metric, utcnow
+from schema.models import (
+    Asset,
+    AssetOrigin,
+    Generation,
+    GenerationKind,
+    Identity,
+    Metric,
+    Project,
+    utcnow,
+)
 
 
 def _asset(session: Session, uri: str, caption="clip", approved=True) -> Asset:
@@ -52,6 +61,50 @@ def test_stats_shape_and_counts(client, session):
     assert [a["caption"] for a in body["recent_assets"][:2]] == ["two", "one"]
     assert body["recent_stages"][0]["stage"] == "export"
     assert body["recent_stages"][0]["duration_ms"] == 1234
+
+
+def test_stats_costs_empty_db_is_zero(client, session):
+    body = client.get("/stats").json()
+    assert body["costs"] == {
+        "total": 0.0,
+        "last_30d": 0.0,
+        "by_provider": {},
+        "by_project": {},
+    }
+
+
+def test_stats_cost_rollups(client, session):
+    """B1: total, 30-day window, and per-provider/per-project breakdowns."""
+    from datetime import timedelta
+
+    project = Project(title="Launch film")
+    session.add(project)
+    session.commit()
+    session.refresh(project)
+
+    def gen(provider, cost, project_id=None, age_days=0):
+        row = Generation(
+            provider=provider, model="m", kind=GenerationKind.text_to_video,
+            prompt="p", cost=cost, project_id=project_id,
+        )
+        session.add(row)
+        session.commit()
+        if age_days:
+            row.created_at = utcnow() - timedelta(days=age_days)
+            session.add(row)
+            session.commit()
+
+    gen("fal", 1.40, project_id=project.id)
+    gen("fal", 0.60)
+    gen("local", 0.0)
+    gen("fal", 2.00, age_days=45)  # outside the 30-day window, still in total
+    gen("fal", None)  # unpriced — excluded from breakdowns, sums as 0
+
+    costs = client.get("/stats").json()["costs"]
+    assert costs["total"] == 4.0
+    assert costs["last_30d"] == 2.0
+    assert costs["by_provider"] == {"fal": 4.0, "local": 0.0}
+    assert costs["by_project"] == {"Launch film": 1.4}
 
 
 def test_stats_survives_store_outage(client, session, monkeypatch):

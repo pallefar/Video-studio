@@ -32,6 +32,7 @@ class CatalogEntry(BaseModel):
     kinds: list[str]
     provider_class: str
     notes: str = ""
+    est_cost: float | None = None
 
 
 @router.get("/catalog", response_model=list[CatalogEntry])
@@ -43,6 +44,7 @@ async def catalog(registry: ProviderRegistry = Depends(get_registry)):
             kinds=sorted(k.value for k in spec.kinds),
             provider_class=spec.provider_class,
             notes=spec.notes,
+            est_cost=getattr(spec, "est_cost", None),
         )
         for spec in registry.catalog()
     ]
