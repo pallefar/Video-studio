@@ -14,6 +14,11 @@ const PX_PER_MS = 0.06; // base zoom: 60px per second
 const SNAP_PX = 8;
 const LANE_H = 56;
 const AUDIO_SUFFIXES = ["wav", "mp3", "m4a", "aac", "ogg", "flac"];
+const VIDEO_SUFFIXES = ["mp4", "mov", "webm", "mkv"];
+
+// Two selectable layouts (persisted): "studio" is the OpenCut-style panel
+// system — assets | preview | properties over a full-width timeline.
+type EditorLayout = "studio" | "simple";
 
 type Drag =
   | ({ kind: "move" | "trim-l" | "trim-r"; clipId: string; startX: number; orig: TimelineClip } & {
@@ -93,6 +98,11 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   // OpenCut (MIT) — the licence register's approved editor reference.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [snapOn, setSnapOn] = useState(true);
+  const [layout, setLayoutState] = useState<EditorLayout>(
+    () => (localStorage.getItem("editor_layout") as EditorLayout) || "studio",
+  );
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [assetSearch, setAssetSearch] = useState("");
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [hover, setHover] = useState<{
@@ -109,6 +119,16 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const drawSeqRef = useRef(0);
   const historyRef = useRef<TimelineDocument[]>([]);
   const redoRef = useRef<TimelineDocument[]>([]);
+  const clipboardRef = useRef<{
+    video: TimelineClip[];
+    audio: AudioClip[];
+    texts: TextClip[];
+  } | null>(null);
+
+  const setLayout = (next: EditorLayout) => {
+    setLayoutState(next);
+    localStorage.setItem("editor_layout", next);
+  };
 
   const pxPerMs = PX_PER_MS * zoom;
 
@@ -139,6 +159,10 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const refreshList = useCallback(() => {
     fetch("/timelines").then((r) => r.json()).then(setTimelines);
     fetch("/assets").then((r) => r.json()).then(setLibrary);
+    fetch("/assets/thumbs")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then(setThumbs)
+      .catch(() => undefined);
   }, []);
 
   useEffect(refreshList, [refreshList]);
@@ -385,13 +409,40 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       });
     });
 
+  const suffixOf = (a: AssetRead) => a.uri.split(".").pop()?.toLowerCase() ?? "";
   const audioAssets = useMemo(
-    () =>
-      library.filter((a) =>
-        AUDIO_SUFFIXES.includes(a.uri.split(".").pop()?.toLowerCase() ?? ""),
-      ),
+    () => library.filter((a) => AUDIO_SUFFIXES.includes(suffixOf(a))),
     [library],
   );
+  // the assets panel offers everything the timeline can hold
+  const timelineAssets = useMemo(
+    () =>
+      library.filter(
+        (a) =>
+          (VIDEO_SUFFIXES.includes(suffixOf(a)) || AUDIO_SUFFIXES.includes(suffixOf(a))) &&
+          (!assetSearch ||
+            (a.caption ?? "").toLowerCase().includes(assetSearch.toLowerCase())),
+      ),
+    [library, assetSearch],
+  );
+
+  // the media map won't have a freshly-added asset yet — presign it now so
+  // preview works before the next save/load (prefer the ingest proxy)
+  const ensureMedia = (assetId: string) => {
+    if (media[assetId]) return;
+    fetch(`/assets/${assetId}/derived`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((derived: Record<string, string>) => {
+        if (derived.proxy) {
+          setMedia((m) => ({ ...m, [assetId]: derived.proxy }));
+          return;
+        }
+        return fetch(`/assets/${assetId}/download`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((body) => body?.url && setMedia((m) => ({ ...m, [assetId]: body.url })));
+      })
+      .catch(() => undefined);
+  };
 
   const addAudio = (asset: AssetRead) => {
     mutate((d) => {
@@ -409,14 +460,75 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         duck: true,
       });
     });
-    // the media map won't have this asset yet — refresh once saved-free
-    if (current && !media[asset.id!]) {
-      fetch(`/assets/${asset.id}/download`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((body) => body?.url && setMedia((m) => ({ ...m, [asset.id!]: body.url })))
-        .catch(() => undefined);
-    }
+    ensureMedia(asset.id!);
   };
+
+  const addClip = (asset: AssetRead) => {
+    mutate((d) => {
+      const lane = d.video_tracks![0];
+      const start = lane.reduce((end, c) => Math.max(end, c.start_ms + clipLen(c)), 0);
+      lane.push({
+        id: crypto.randomUUID(),
+        asset_id: asset.id!,
+        start_ms: start,
+        in_ms: 0,
+        out_ms: Math.max(500, asset.duration_ms ?? 3000),
+      });
+    });
+    ensureMedia(asset.id!);
+  };
+
+  const addAsset = (asset: AssetRead) =>
+    AUDIO_SUFFIXES.includes(suffixOf(asset)) ? addAudio(asset) : addClip(asset);
+
+  const copySelected = () => {
+    if (selectedIds.length === 0) return;
+    clipboardRef.current = {
+      video: track.filter((c) => selectedIds.includes(c.id)).map((c) => ({ ...c })),
+      audio: audio.filter((c) => selectedIds.includes(c.id)).map((c) => ({ ...c })),
+      texts: texts.filter((t) => selectedIds.includes(t.id)).map((t) => ({ ...t })),
+    };
+  };
+
+  const pasteClipboard = () => {
+    const clip = clipboardRef.current;
+    if (!clip) return;
+    mutate((d) => {
+      // lanes have a no-overlap rule, so pasted clips append at the lane end
+      let end = d.video_tracks![0].reduce(
+        (e, c) => Math.max(e, c.start_ms + clipLen(c)), 0,
+      );
+      for (const c of clip.video) {
+        d.video_tracks![0].push({ ...c, id: crypto.randomUUID(), start_ms: end });
+        end += clipLen(c);
+      }
+      if (clip.audio.length) {
+        if (!d.audio_tracks || d.audio_tracks.length === 0) d.audio_tracks = [[]];
+        let audioEnd = d.audio_tracks[0].reduce(
+          (e, c) => Math.max(e, c.start_ms + clipLen(c)), 0,
+        );
+        for (const c of clip.audio) {
+          d.audio_tracks[0].push({ ...c, id: crypto.randomUUID(), start_ms: audioEnd });
+          audioEnd += clipLen(c);
+        }
+      }
+      // texts may overlap freely: paste at the playhead, offsets preserved
+      const firstText = Math.min(...clip.texts.map((t) => t.start_ms), Infinity);
+      for (const t of clip.texts) {
+        const shift = playhead - firstText;
+        d.texts = d.texts ?? [];
+        d.texts.push({
+          ...t,
+          id: crypto.randomUUID(),
+          start_ms: Math.max(0, t.start_ms + shift),
+          end_ms: Math.max(100, t.end_ms + shift),
+        });
+      }
+    });
+  };
+
+  const selectAll = () =>
+    setSelectedIds([...track, ...audio, ...texts].map((x) => x.id));
 
   const save = () => {
     if (!current || !doc) return;
@@ -483,6 +595,9 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       else if (mod && key === "z") undo();
       else if (mod && key === "y") redo();
       else if (mod && key === "d") duplicateSelected();
+      else if (mod && key === "c") copySelected();
+      else if (mod && key === "v") pasteClipboard();
+      else if (mod && key === "a") selectAll();
       else if (mod) handled = false;
       else if (e.code === "Space" || key === "k") setPlaying((p) => !p);
       else if (key === "j") seek(-1000);
@@ -617,11 +732,418 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         hoverExtras.cues[hoverExtras.cues.length - 1])
       : undefined;
 
+
   const lanes = [
     { top: 0 },
     { top: LANE_H + 8 },
     { top: (LANE_H + 8) * 2 },
   ];
+  const selectedVideoClip = track.find((c) => c.id === soleSelected);
+  const canvasW = isShort ? (layout === "studio" ? 270 : 180) : layout === "studio" ? 640 : 320;
+  const canvasH = isShort ? (layout === "studio" ? 480 : 320) : layout === "studio" ? 360 : 180;
+
+  const fmtTime = (ms: number) => {
+    const m = Math.floor(ms / 60000);
+    const s = (ms % 60000) / 1000;
+    return `${m}:${s.toFixed(1).padStart(4, "0")}`;
+  };
+
+  const timeField = (
+    label: string,
+    valueMs: number,
+    apply: (d: TimelineDocument, ms: number) => void,
+  ) => (
+    <label key={label} className="flex items-center justify-between gap-2 text-xs">
+      <span className="text-ink-faint">{label}</span>
+      <input
+        type="number"
+        step={0.1}
+        min={0}
+        value={Number((valueMs / 1000).toFixed(2))}
+        onChange={(e) => {
+          const seconds = Number(e.target.value);
+          if (Number.isNaN(seconds) || seconds < 0) return;
+          mutate((d) => apply(d, Math.round(seconds * 1000)));
+        }}
+        className="w-20 rounded border border-edge bg-field px-2 py-1 text-right text-xs"
+      />
+    </label>
+  );
+
+  const textInspector = selectedText && (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">Text</p>
+      <input
+        value={selectedText.text}
+        onChange={(e) =>
+          mutate((d) => {
+            const t = d.texts!.find((x) => x.id === soleSelected);
+            if (t) t.text = e.target.value;
+          })
+        }
+        className="w-full rounded border border-edge bg-field px-2 py-1 text-sm text-ink"
+      />
+      <label className="flex items-center justify-between gap-2 text-xs">
+        <span className="text-ink-faint">vertical {(100 * (selectedText.y_pct ?? 0.8)).toFixed(0)}%</span>
+        <input
+          type="range"
+          min={0.05}
+          max={0.95}
+          step={0.01}
+          value={selectedText.y_pct ?? 0.8}
+          onChange={(e) =>
+            mutate((d) => {
+              const t = d.texts!.find((x) => x.id === soleSelected);
+              if (t) t.y_pct = Number(e.target.value);
+            })
+          }
+        />
+      </label>
+      {timeField("start s", selectedText.start_ms, (d, ms) => {
+        const t = d.texts!.find((x) => x.id === soleSelected);
+        if (t && ms < t.end_ms) t.start_ms = ms;
+      })}
+      {timeField("end s", selectedText.end_ms, (d, ms) => {
+        const t = d.texts!.find((x) => x.id === soleSelected);
+        if (t && ms > t.start_ms) t.end_ms = ms;
+      })}
+    </div>
+  );
+
+  const audioInspector = selectedAudio && (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">Audio bed</p>
+      <label className="flex items-center gap-2 text-xs">
+        gain {(selectedAudio.gain ?? 1).toFixed(1)}×
+        <input
+          type="range"
+          min={0}
+          max={4}
+          step={0.1}
+          value={selectedAudio.gain ?? 1}
+          onChange={(e) =>
+            mutate((d) => {
+              const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
+              if (c) c.gain = Number(e.target.value);
+            })
+          }
+        />
+      </label>
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={selectedAudio.duck ?? true}
+          onChange={(e) =>
+            mutate((d) => {
+              const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
+              if (c) c.duck = e.target.checked;
+            })
+          }
+        />
+        duck under voice
+      </label>
+      {timeField("start s", selectedAudio.start_ms, (d, ms) => {
+        const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
+        if (c) c.start_ms = ms;
+      })}
+    </div>
+  );
+
+  const clipInspector = selectedVideoClip && (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">Clip</p>
+      <p className="truncate text-xs text-ink-muted">
+        {library.find((a) => a.id === selectedVideoClip.asset_id)?.caption ?? "clip"} ·{" "}
+        {(clipLen(selectedVideoClip) / 1000).toFixed(1)}s
+      </p>
+      {timeField("start s", selectedVideoClip.start_ms, (d, ms) => {
+        const c = d.video_tracks![0].find((x) => x.id === soleSelected);
+        if (c) c.start_ms = ms;
+      })}
+      {timeField("in s", inMs(selectedVideoClip), (d, ms) => {
+        const c = d.video_tracks![0].find((x) => x.id === soleSelected);
+        if (c && ms < c.out_ms) c.in_ms = ms;
+      })}
+      {timeField("out s", selectedVideoClip.out_ms, (d, ms) => {
+        const c = d.video_tracks![0].find((x) => x.id === soleSelected);
+        if (c && ms > inMs(c)) c.out_ms = ms;
+      })}
+    </div>
+  );
+
+  const propertiesPanel = (
+    <aside className="w-60 shrink-0 space-y-4 rounded-2xl border border-edge bg-surface p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+        Properties
+      </p>
+      {clipInspector ?? audioInspector ?? textInspector ?? (
+        selectedIds.length > 1 ? (
+          <p className="text-xs text-ink-muted">{selectedIds.length} items selected</p>
+        ) : (
+          <p className="text-xs text-ink-faint">Select a clip, bed, or title to edit it.</p>
+        )
+      )}
+    </aside>
+  );
+
+  const assetsPanel = (
+    <aside className="flex w-64 shrink-0 flex-col gap-2 rounded-2xl border border-edge bg-surface p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">Assets</p>
+      <input
+        value={assetSearch}
+        onChange={(e) => setAssetSearch(e.target.value)}
+        placeholder="Search library…"
+        className="rounded-lg border border-edge bg-field px-2 py-1.5 text-xs placeholder-ink-faint"
+      />
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        {timelineAssets.length === 0 && (
+          <p className="text-xs text-ink-faint">Nothing matches.</p>
+        )}
+        {timelineAssets.map((a) => {
+          const isAudio = AUDIO_SUFFIXES.includes(suffixOf(a));
+          return (
+            <button
+              key={a.id}
+              onClick={() => addAsset(a)}
+              title="Add to timeline"
+              className="flex w-full items-center gap-2 rounded-lg border border-transparent p-1 text-left hover:border-edge-strong hover:bg-btn"
+            >
+              <div className="h-9 w-16 shrink-0 overflow-hidden rounded bg-surface2">
+                {isAudio ? (
+                  <div className="flex h-full items-center justify-center text-accent">♪</div>
+                ) : thumbs[a.id!] ? (
+                  <img src={thumbs[a.id!]} alt="" className="h-full w-full object-cover" loading="lazy" />
+                ) : null}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs text-ink-soft">{a.caption ?? "untitled"}</p>
+                <p className="text-[10px] text-ink-faint">
+                  {a.duration_ms ? `${(a.duration_ms / 1000).toFixed(1)}s` : suffixOf(a)}
+                </p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-ink-faint">Click to append · audio lands on the bed lane</p>
+    </aside>
+  );
+
+  const transportBar = (
+    <div className="flex items-center justify-center gap-2">
+      <button onClick={() => setPlayhead(0)} title="Home" className="rounded-lg bg-btn px-2.5 py-1.5 text-sm">⏮</button>
+      <button onClick={() => setPlayhead((p) => Math.max(0, p - 100))} title="←" className="rounded-lg bg-btn px-2.5 py-1.5 text-sm">◀</button>
+      <button
+        onClick={() => setPlaying((p) => !p)}
+        title="Space"
+        className="rounded-lg bg-lime-300 px-5 py-1.5 text-sm font-semibold text-black hover:bg-lime-200"
+      >
+        {playing ? "⏸" : "▶"}
+      </button>
+      <button onClick={() => setPlayhead((p) => Math.min(totalMs, p + 100))} title="→" className="rounded-lg bg-btn px-2.5 py-1.5 text-sm">▶▏</button>
+      <button onClick={() => setPlayhead(totalMs)} title="End" className="rounded-lg bg-btn px-2.5 py-1.5 text-sm">⏭</button>
+      <span className="ml-2 font-mono text-xs text-ink-muted">
+        {fmtTime(playhead)} / {fmtTime(totalMs)}
+      </span>
+    </div>
+  );
+
+  const editToolbar = (
+    <div className="flex flex-wrap items-center gap-2">
+      {layout === "simple" && (
+        <button
+          onClick={() => setPlaying((p) => !p)}
+          title="Space"
+          className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200"
+        >
+          {playing ? "⏸ Pause" : "▶ Play"}
+        </button>
+      )}
+      <button onClick={undo} title="Ctrl+Z" className="rounded-lg bg-btn px-3 py-2 text-sm">↩</button>
+      <button onClick={redo} title="Ctrl+Shift+Z" className="rounded-lg bg-btn px-3 py-2 text-sm">↪</button>
+      <button onClick={() => splitSelected("both")} title="S — split at playhead"
+        className="rounded-lg bg-btn px-3 py-2 text-sm">Split</button>
+      <button
+        onClick={() => setSnapOn((s) => !s)}
+        title="N — toggle snapping"
+        className={`rounded-lg px-3 py-2 text-sm ${snapOn ? "bg-accent-soft2 text-accent" : "bg-btn text-ink-muted"}`}
+      >
+        Snap
+      </button>
+      <button onClick={addText} className="rounded-lg bg-btn px-3 py-2 text-sm">+ Text</button>
+      {layout === "simple" && (
+        <select
+          value=""
+          onChange={(e) => {
+            const asset = audioAssets.find((a) => a.id === e.target.value);
+            if (asset) addAudio(asset);
+          }}
+          className="rounded-lg border border-edge bg-field px-3 py-2 text-sm"
+        >
+          <option value="">+ Audio…</option>
+          {audioAssets.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.caption ?? a.uri.split("/").pop()}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        onClick={(e) => deleteSelected(e.shiftKey)}
+        disabled={selectedIds.length === 0}
+        title="Delete · Shift = ripple (close the gap)"
+        className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300 disabled:opacity-40"
+      >
+        Delete
+      </button>
+      <label className="ml-2 text-xs text-ink-muted">
+        zoom
+        <input type="range" min={0.3} max={3} step={0.1} value={zoom}
+          onChange={(e) => setZoom(Number(e.target.value))} className="ml-1 align-middle" />
+      </label>
+    </div>
+  );
+
+  const timelineStrip = (
+    <div
+      className="overflow-x-auto rounded-2xl border border-edge bg-surface-dim p-3 select-none"
+      onPointerMove={onPointerMove}
+      onPointerUp={() => (dragRef.current = null)}
+    >
+      <div
+        className="relative mb-1 h-6 cursor-pointer border-b border-edge"
+        style={{ width: totalMs * pxPerMs }}
+        onPointerDown={(e) => {
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          setPlayhead(Math.max(0, (e.clientX - rect.left) / pxPerMs));
+        }}
+      >
+        {Array.from({ length: Math.ceil(totalMs / 1000) + 1 }, (_, s) => (
+          <span key={s} className="absolute top-1 text-[10px] text-ink-faint"
+            style={{ left: s * 1000 * pxPerMs }}>{s}s</span>
+        ))}
+      </div>
+
+      <div
+        className="relative"
+        style={{ width: totalMs * pxPerMs, height: LANE_H * 3 + 20 }}
+      >
+        {lanes.map((lane, i) => (
+          <div key={i} className="absolute inset-x-0 rounded bg-surface2"
+            style={{ top: lane.top, height: LANE_H }} />
+        ))}
+        {track.map((c) => (
+          <div key={c.id}
+            onPointerDown={(e) => grab(e, { kind: "move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+            onPointerMove={(e) => {
+              if (dragRef.current) return;
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+              setHover({
+                clipId: c.id,
+                x: e.clientX,
+                y: rect.top,
+                srcMs: inMs(c) + frac * clipLen(c),
+              });
+            }}
+            onPointerLeave={() => setHover((h) => (h?.clipId === c.id ? null : h))}
+            className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
+              selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn"
+            }`}
+            style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: 4, height: LANE_H - 8 }}
+          >
+            <span className="truncate text-ink-soft">{(clipLen(c) / 1000).toFixed(1)}s</span>
+            <div onPointerDown={(e) => grab(e, { kind: "trim-l", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+            <div onPointerDown={(e) => grab(e, { kind: "trim-r", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+          </div>
+        ))}
+        {audio.map((c) => (
+          <div key={c.id}
+            onPointerDown={(e) => grab(e, { kind: "audio-move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+            className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
+              selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
+            }`}
+            style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: LANE_H + 12, height: LANE_H - 8 }}
+          >
+            {extras[c.asset_id]?.peaks?.length ? (
+              <div className="pointer-events-none absolute inset-x-1 inset-y-2 text-accent opacity-70">
+                <Bars values={extras[c.asset_id].peaks!} mirror height={LANE_H - 24} />
+              </div>
+            ) : null}
+            <span className="relative truncate text-ink-soft">
+              ♪ {(clipLen(c) / 1000).toFixed(1)}s · {(c.gain ?? 1).toFixed(1)}×
+              {(c.duck ?? true) ? " · duck" : ""}
+            </span>
+            <div onPointerDown={(e) => grab(e, { kind: "audio-l", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+            <div onPointerDown={(e) => grab(e, { kind: "audio-r", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+          </div>
+        ))}
+        {texts.map((t) => (
+          <div key={t.id}
+            onPointerDown={(e) => grab(e, { kind: "text-move", clipId: t.id, startX: e.clientX, orig: { ...t } })}
+            className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
+              selectedIds.includes(t.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
+            }`}
+            style={{ left: t.start_ms * pxPerMs, width: (t.end_ms - t.start_ms) * pxPerMs, top: (LANE_H + 8) * 2 + 4, height: LANE_H - 8 }}
+          >
+            <span className="truncate text-ink-soft">T: {t.text}</span>
+            <div onPointerDown={(e) => grab(e, { kind: "text-l", clipId: t.id, startX: e.clientX, orig: { ...t } })}
+              className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+            <div onPointerDown={(e) => grab(e, { kind: "text-r", clipId: t.id, startX: e.clientX, orig: { ...t } })}
+              className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+          </div>
+        ))}
+        <div className="pointer-events-none absolute inset-y-0 w-px bg-emerald-400"
+          style={{ left: playhead * pxPerMs }} />
+      </div>
+    </div>
+  );
+
+  const hintStrip = (
+    <p className="text-[11px] text-ink-faint">
+      space/K play · J/L ±1s · ←/→ step (shift jump) · S split · Q/W trim to playhead ·
+      del delete (shift = ripple) · ctrl+C/V copy/paste · ctrl+A all · ctrl+D duplicate ·
+      ctrl+Z/Y undo/redo · N snap · shift-click multi-select · esc deselect
+    </p>
+  );
+
+  const hoverThumb = hover && hoverClip && hoverCue && hoverExtras?.sprite && (
+    <div
+      className="pointer-events-none fixed z-50 -translate-x-1/2 overflow-hidden rounded-lg border border-edge-strong shadow-lg"
+      style={{
+        left: hover.x,
+        top: hover.y - hoverCue.h - 12,
+        width: hoverCue.w,
+        height: hoverCue.h,
+        backgroundImage: `url(${hoverExtras.sprite})`,
+        backgroundPosition: `-${hoverCue.x}px -${hoverCue.y}px`,
+      }}
+    >
+      <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-white">
+        {(hover.srcMs / 1000).toFixed(1)}s
+      </span>
+    </div>
+  );
+
+  const previewCanvas = (
+    <canvas
+      ref={canvasRef}
+      width={canvasW}
+      height={canvasH}
+      className="h-auto max-w-full rounded-lg border border-edge bg-field"
+    />
+  );
+
+  const infoLine = current && (
+    <p className="text-xs text-ink-muted">
+      {(totalMs / 1000).toFixed(1)}s · {track.length} clips · {audio.length} audio ·{" "}
+      {texts.length} texts · v{current.version}
+    </p>
+  );
 
   return (
     <div className="space-y-4">
@@ -638,15 +1160,21 @@ export default function EditorView({ openId }: { openId?: string | null }) {
             </option>
           ))}
         </select>
+        <div className="flex overflow-hidden rounded-lg border border-edge">
+          {(["studio", "simple"] as EditorLayout[]).map((l) => (
+            <button
+              key={l}
+              onClick={() => setLayout(l)}
+              className={`px-3 py-2 text-xs capitalize ${
+                layout === l ? "bg-lime-300 font-semibold text-black" : "bg-btn text-ink-muted"
+              }`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
         {current && (
           <>
-            <button
-              onClick={() => setPlaying((p) => !p)}
-              title="Space"
-              className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200"
-            >
-              {playing ? "⏸ Pause" : "▶ Play"}
-            </button>
             <button onClick={save} disabled={!dirty}
               className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40">
               Save{dirty ? " *" : ""}
@@ -655,239 +1183,48 @@ export default function EditorView({ openId }: { openId?: string | null }) {
               className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200">
               Export
             </button>
-            <button onClick={undo} title="Ctrl+Z"
-              className="rounded-lg bg-btn px-3 py-2 text-sm">↩</button>
-            <button onClick={redo} title="Ctrl+Shift+Z"
-              className="rounded-lg bg-btn px-3 py-2 text-sm">↪</button>
-            <button onClick={() => splitSelected("both")} title="S — split at playhead"
-              className="rounded-lg bg-btn px-3 py-2 text-sm">Split</button>
-            <button
-              onClick={() => setSnapOn((s) => !s)}
-              title="N — toggle snapping"
-              className={`rounded-lg px-3 py-2 text-sm ${snapOn ? "bg-accent-soft2 text-accent" : "bg-btn text-ink-muted"}`}
-            >
-              Snap
-            </button>
-            <button onClick={addText} className="rounded-lg bg-btn px-3 py-2 text-sm">+ Text</button>
-            <select
-              value=""
-              onChange={(e) => {
-                const asset = audioAssets.find((a) => a.id === e.target.value);
-                if (asset) addAudio(asset);
-              }}
-              className="rounded-lg border border-edge bg-field px-3 py-2 text-sm"
-            >
-              <option value="">+ Audio…</option>
-              {audioAssets.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.caption ?? a.uri.split("/").pop()}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={(e) => deleteSelected(e.shiftKey)}
-              disabled={selectedIds.length === 0}
-              title="Delete · Shift = ripple (close the gap)"
-              className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300 disabled:opacity-40"
-            >
-              Delete
-            </button>
-            <label className="ml-2 text-xs text-ink-muted">
-              zoom
-              <input type="range" min={0.3} max={3} step={0.1} value={zoom}
-                onChange={(e) => setZoom(Number(e.target.value))} className="ml-1 align-middle" />
-            </label>
           </>
         )}
         {status && <span className="text-xs text-ink-muted">{status}</span>}
       </div>
 
-      {current && doc && (
+      {current && doc && layout === "studio" && (
         <>
-          <div className="flex gap-4">
-            <canvas
-              ref={canvasRef}
-              width={isShort ? 180 : 320}
-              height={isShort ? 320 : 180}
-              className="rounded-lg border border-edge bg-field"
-            />
-            <div className="flex-1 text-xs text-ink-muted">
-              <p className="mb-1 text-sm text-ink-soft">{current.title}</p>
-              <p>
-                {(totalMs / 1000).toFixed(1)}s · {track.length} clips · {audio.length} audio ·{" "}
-                {texts.length} texts · v{current.version}
-              </p>
-              <p className="mt-2">
-                Playhead {(playhead / 1000).toFixed(2)}s{playing ? " · playing" : ""}
-              </p>
-              {selectedText && (
-                <input
-                  value={selectedText.text}
-                  onChange={(e) =>
-                    mutate((d) => {
-                      const t = d.texts!.find((x) => x.id === soleSelected);
-                      if (t) t.text = e.target.value;
-                    })
-                  }
-                  className="mt-2 w-full rounded border border-edge bg-field px-2 py-1 text-sm text-ink"
-                />
-              )}
-              {selectedAudio && (
-                <div className="mt-2 space-y-1 rounded-lg border border-edge bg-surface p-2">
-                  <label className="flex items-center gap-2">
-                    gain {(selectedAudio.gain ?? 1).toFixed(1)}×
-                    <input
-                      type="range"
-                      min={0}
-                      max={4}
-                      step={0.1}
-                      value={selectedAudio.gain ?? 1}
-                      onChange={(e) =>
-                        mutate((d) => {
-                          const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
-                          if (c) c.gain = Number(e.target.value);
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selectedAudio.duck ?? true}
-                      onChange={(e) =>
-                        mutate((d) => {
-                          const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
-                          if (c) c.duck = e.target.checked;
-                        })
-                      }
-                    />
-                    duck under voice
-                  </label>
-                </div>
-              )}
+          <div className="flex items-stretch gap-3">
+            {assetsPanel}
+            <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-edge bg-surface-dim p-4">
+              {previewCanvas}
+              {transportBar}
+              {infoLine}
             </div>
+            {propertiesPanel}
           </div>
-
-          <div
-            className="overflow-x-auto rounded-2xl border border-edge bg-surface-dim p-3 select-none"
-            onPointerMove={onPointerMove}
-            onPointerUp={() => (dragRef.current = null)}
-          >
-            <div
-              className="relative mb-1 h-6 cursor-pointer border-b border-edge"
-              style={{ width: totalMs * pxPerMs }}
-              onPointerDown={(e) => {
-                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                setPlayhead(Math.max(0, (e.clientX - rect.left) / pxPerMs));
-              }}
-            >
-              {Array.from({ length: Math.ceil(totalMs / 1000) + 1 }, (_, s) => (
-                <span key={s} className="absolute top-1 text-[10px] text-ink-faint"
-                  style={{ left: s * 1000 * pxPerMs }}>{s}s</span>
-              ))}
-            </div>
-
-            <div
-              className="relative"
-              style={{ width: totalMs * pxPerMs, height: LANE_H * 3 + 20 }}
-            >
-              {lanes.map((lane, i) => (
-                <div key={i} className="absolute inset-x-0 rounded bg-surface2"
-                  style={{ top: lane.top, height: LANE_H }} />
-              ))}
-              {track.map((c) => (
-                <div key={c.id}
-                  onPointerDown={(e) => grab(e, { kind: "move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
-                  onPointerMove={(e) => {
-                    if (dragRef.current) return;
-                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-                    setHover({
-                      clipId: c.id,
-                      x: e.clientX,
-                      y: rect.top,
-                      srcMs: inMs(c) + frac * clipLen(c),
-                    });
-                  }}
-                  onPointerLeave={() => setHover((h) => (h?.clipId === c.id ? null : h))}
-                  className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn"
-                  }`}
-                  style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: 4, height: LANE_H - 8 }}
-                >
-                  <span className="truncate text-ink-soft">{(clipLen(c) / 1000).toFixed(1)}s</span>
-                  <div onPointerDown={(e) => grab(e, { kind: "trim-l", clipId: c.id, startX: e.clientX, orig: { ...c } })}
-                    className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
-                  <div onPointerDown={(e) => grab(e, { kind: "trim-r", clipId: c.id, startX: e.clientX, orig: { ...c } })}
-                    className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
-                </div>
-              ))}
-              {audio.map((c) => (
-                <div key={c.id}
-                  onPointerDown={(e) => grab(e, { kind: "audio-move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
-                  className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
-                  }`}
-                  style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: LANE_H + 12, height: LANE_H - 8 }}
-                >
-                  {extras[c.asset_id]?.peaks?.length ? (
-                    <div className="pointer-events-none absolute inset-x-1 inset-y-2 text-accent opacity-70">
-                      <Bars values={extras[c.asset_id].peaks!} mirror height={LANE_H - 24} />
-                    </div>
-                  ) : null}
-                  <span className="relative truncate text-ink-soft">
-                    ♪ {(clipLen(c) / 1000).toFixed(1)}s · {(c.gain ?? 1).toFixed(1)}×
-                    {(c.duck ?? true) ? " · duck" : ""}
-                  </span>
-                  <div onPointerDown={(e) => grab(e, { kind: "audio-l", clipId: c.id, startX: e.clientX, orig: { ...c } })}
-                    className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
-                  <div onPointerDown={(e) => grab(e, { kind: "audio-r", clipId: c.id, startX: e.clientX, orig: { ...c } })}
-                    className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
-                </div>
-              ))}
-              {texts.map((t) => (
-                <div key={t.id}
-                  onPointerDown={(e) => grab(e, { kind: "text-move", clipId: t.id, startX: e.clientX, orig: { ...t } })}
-                  className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selectedIds.includes(t.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
-                  }`}
-                  style={{ left: t.start_ms * pxPerMs, width: (t.end_ms - t.start_ms) * pxPerMs, top: (LANE_H + 8) * 2 + 4, height: LANE_H - 8 }}
-                >
-                  <span className="truncate text-ink-soft">T: {t.text}</span>
-                  <div onPointerDown={(e) => grab(e, { kind: "text-l", clipId: t.id, startX: e.clientX, orig: { ...t } })}
-                    className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
-                  <div onPointerDown={(e) => grab(e, { kind: "text-r", clipId: t.id, startX: e.clientX, orig: { ...t } })}
-                    className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
-                </div>
-              ))}
-              <div className="pointer-events-none absolute inset-y-0 w-px bg-emerald-400"
-                style={{ left: playhead * pxPerMs }} />
-            </div>
-          </div>
-          <p className="text-[11px] text-ink-faint">
-            space/K play · J/L ±1s · ←/→ step (shift jump) · S split · Q/W trim to playhead ·
-            del delete (shift = ripple) · ctrl+D duplicate · ctrl+Z/Y undo/redo · N snap ·
-            shift-click multi-select · esc deselect
-          </p>
-          {hover && hoverClip && hoverCue && hoverExtras?.sprite && (
-            <div
-              className="pointer-events-none fixed z-50 -translate-x-1/2 overflow-hidden rounded-lg border border-edge-strong shadow-lg"
-              style={{
-                left: hover.x,
-                top: hover.y - hoverCue.h - 12,
-                width: hoverCue.w,
-                height: hoverCue.h,
-                backgroundImage: `url(${hoverExtras.sprite})`,
-                backgroundPosition: `-${hoverCue.x}px -${hoverCue.y}px`,
-              }}
-            >
-              <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-white">
-                {(hover.srcMs / 1000).toFixed(1)}s
-              </span>
-            </div>
-          )}
+          {editToolbar}
+          {timelineStrip}
+          {hintStrip}
+          {hoverThumb}
         </>
       )}
+
+      {current && doc && layout === "simple" && (
+        <>
+          <div className="flex gap-4">
+            {previewCanvas}
+            <div className="flex-1 space-y-2 text-xs text-ink-muted">
+              <p className="mb-1 text-sm text-ink-soft">{current.title}</p>
+              {infoLine}
+              <p>Playhead {(playhead / 1000).toFixed(2)}s{playing ? " · playing" : ""}</p>
+              {textInspector}
+              {audioInspector}
+            </div>
+          </div>
+          {editToolbar}
+          {timelineStrip}
+          {hintStrip}
+          {hoverThumb}
+        </>
+      )}
+
       {!current && (
         <p className="text-sm text-ink-faint">
           Open a timeline, or send a storyboard here with its "Edit" button.
