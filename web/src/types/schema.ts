@@ -5,11 +5,15 @@ export type JobStatus = "queued" | "tts" | "lipsync" | "assemble" | "review" | "
 
 export type AssetOrigin = "generated" | "stock" | "own";
 
-export type GenerationKind = "text_to_video" | "image_to_video" | "image" | "upscale";
+export type GenerationKind = "text_to_video" | "image_to_video" | "video_to_video" | "image" | "upscale" | "music" | "talking_image" | "voice";
 
-export type GenerationStatus = "queued" | "running" | "succeeded" | "failed";
+export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
 export type VideoFormat = "long" | "short";
+
+export type IdentityTrainingStatus = "untrained" | "queued" | "training" | "trained" | "failed";
+
+export type ProjectKind = "video" | "movie" | "game" | "other";
 
 export interface WatermarkConfig {
   text?: string;
@@ -59,6 +63,10 @@ export interface BaseLoopRead {
   frame_count: number;
   seam_index?: number | null;
   id: string;
+  vfr_ratio?: number | null;
+  seam_score?: number | null;
+  ping_pong?: boolean;
+  error?: string | null;
   created_at: string;
 }
 
@@ -69,6 +77,7 @@ export interface SegmentRead {
   audio_uri?: string | null;
   duration_ms?: number | null;
   seed?: number | null;
+  emotion?: string | null;
   id: string;
   job_id: string;
 }
@@ -92,6 +101,7 @@ export interface RenderJobRead {
   watermark: WatermarkConfig;
   publish: PublishConfig;
   error?: string | null;
+  output_uri?: string | null;
   created_at: string;
   updated_at: string;
   segments?: SegmentRead[];
@@ -106,7 +116,8 @@ export interface PublishRecordRead {
   altered_content?: boolean;
   reviewed_by: string;
   id: string;
-  job_id: string;
+  job_id?: string | null;
+  asset_id?: string | null;
   youtube_id?: string | null;
   published_at?: string | null;
   created_at: string;
@@ -149,6 +160,8 @@ export interface GenerationCreate {
   params?: Record<string, unknown> | null;
   fallback?: GenerationTarget[];
   project_id?: string | null;
+  identity_id?: string | null;
+  enhance?: boolean;
 }
 
 export interface GenerationRead {
@@ -165,6 +178,8 @@ export interface GenerationRead {
   error?: string | null;
   asset_id?: string | null;
   project_id?: string | null;
+  identity_id?: string | null;
+  source_asset_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -193,6 +208,42 @@ export interface StyleTemplateRead {
   description: string;
   prompt_suffix: string;
   params?: Record<string, unknown>;
+}
+
+export interface EffectPresetRead {
+  id: string;
+  label: string;
+  description: string;
+  category: string;
+  prompt_template: string;
+  stackable?: boolean;
+}
+
+export interface IdentityCreate {
+  name: string;
+  description?: string | null;
+  reference_asset_ids?: string[];
+}
+
+export interface IdentityRead {
+  name: string;
+  description?: string | null;
+  id: string;
+  reference_asset_ids?: string[];
+  consent_recorded_by?: string | null;
+  consent_at?: string | null;
+  consent_note?: string | null;
+  has_consent?: boolean;
+  training_status: IdentityTrainingStatus;
+  lora_uri?: string | null;
+  error?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConsentRecord {
+  recorded_by: string;
+  note?: string | null;
 }
 
 export interface ShotCreate {
@@ -238,11 +289,13 @@ export interface StoryboardRead {
 export interface ProjectCreate {
   title: string;
   description?: string | null;
+  kind?: ProjectKind;
 }
 
 export interface ProjectRead {
   title: string;
   description?: string | null;
+  kind?: ProjectKind;
   id: string;
   created_at: string;
   updated_at: string;
@@ -266,6 +319,8 @@ export interface AudioClip {
   out_ms: number;
   gain?: number;
   duck?: boolean;
+  fade_in_ms?: number;
+  fade_out_ms?: number;
 }
 
 export interface TextClip {

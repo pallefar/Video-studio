@@ -6,9 +6,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from api.db import get_session
+from api.routes.jobs import get_dispatcher
+from pipeline_core.dispatch import Dispatcher
+from pipeline_core.queues import QUEUE_CPU, stage_key
 from schema.models import BaseLoop, BaseLoopCreate, BaseLoopRead, RenderJob
 
 router = APIRouter(prefix="/loops", tags=["loops"])
+
+PREPROCESS_STAGE = "worker_cpu.stages.loop_preprocess_stage"
+
+
+def _enqueue_preprocess(dispatcher: Dispatcher, loop_id: uuid.UUID) -> None:
+    dispatcher.enqueue(
+        QUEUE_CPU, PREPROCESS_STAGE, str(loop_id),
+        job_key=stage_key(loop_id, "loop_preprocess"),
+    )
 
 
 def _get_or_404(session: Session, loop_id: uuid.UUID) -> BaseLoop:
@@ -24,11 +36,29 @@ def _is_referenced(session: Session, loop_id: uuid.UUID) -> bool:
 
 
 @router.post("", response_model=BaseLoopRead, status_code=201)
-async def create_loop(body: BaseLoopCreate, session: Session = Depends(get_session)):
+async def create_loop(
+    body: BaseLoopCreate,
+    session: Session = Depends(get_session),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+):
     loop = BaseLoop.model_validate(body)
     session.add(loop)
     session.commit()
     session.refresh(loop)
+    # M2: VFR rejection and seam detection run at ingest, never mid-pipeline
+    _enqueue_preprocess(dispatcher, loop.id)
+    return loop
+
+
+@router.post("/{loop_id}/preprocess", response_model=BaseLoopRead, status_code=202)
+async def preprocess_loop(
+    loop_id: uuid.UUID,
+    session: Session = Depends(get_session),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+):
+    """Re-run M2 preprocessing (e.g. after replacing the source)."""
+    loop = _get_or_404(session, loop_id)
+    _enqueue_preprocess(dispatcher, loop.id)
     return loop
 
 

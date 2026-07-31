@@ -1,0 +1,19 @@
+# Render lane: Chatterbox + MuseTalk resident, concurrency 1 — NEVER run a
+# second instance (24 GB fits one lane; asserted in tests/test_queue_topology).
+# Native process by design: the GPU worker is not containerised (CLAUDE.md).
+[Unit]
+Description=AI video studio GPU render worker (gpu queue)
+After=network-online.target studio-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=studio
+WorkingDirectory=/opt/video-studio
+EnvironmentFile=/opt/video-studio/.env
+ExecStart=/opt/video-studio/.venv/bin/python worker_gpu/run.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

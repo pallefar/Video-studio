@@ -157,6 +157,93 @@ def test_media_endpoint_presigns_clip_assets(client, session):
         assert asset.uri.split("/")[-1] in media[str(asset.id)]
 
 
+def test_media_endpoint_includes_audio_track_assets(client, session):
+    """C2 (editor v2): the transport plays music beds too, so audio-track
+    assets must be presigned alongside the video clips."""
+    with mock_aws():
+        store = ObjectStore(Settings(s3_endpoint="", s3_bucket="avatar-pipeline"))
+        store.ensure_bucket()
+        client.app.dependency_overrides[get_object_store] = lambda: store
+        video = _seed_asset(session)
+        music = Asset(origin=AssetOrigin.own, uri=f"s3://avatar-pipeline/{uuid.uuid4()}.wav",
+                      caption="bed", has_identifiable_people=False, approved=True)
+        session.add(music)
+        session.commit()
+        session.refresh(music)
+
+        timeline = client.post("/timelines", json={"title": "with bed"}).json()
+        doc = {
+            "video_tracks": [[_clip(0, 0, 1000, asset_id=str(video.id))]],
+            "audio_tracks": [[{
+                "id": "a1", "asset_id": str(music.id), "start_ms": 0,
+                "in_ms": 0, "out_ms": 4000, "gain": 0.8, "duck": True,
+            }]],
+        }
+        response = client.put(
+            f"/timelines/{timeline['id']}", json={"doc": doc, "base_version": 1}
+        )
+        assert response.status_code == 200, response.text
+
+        media = client.get(f"/timelines/{timeline['id']}/media").json()
+        assert str(video.id) in media
+        assert str(music.id) in media
+        assert music.uri.split("/")[-1] in media[str(music.id)]
+
+
+def test_export_serialises_overlay_track(client, session, dispatcher):
+    """A3: video_tracks[1] flows into the render timeline as PiP overlays,
+    origin included so a generated overlay forces C1 in the compiler."""
+    base = _seed_asset(session)
+    pip = _seed_asset(session, caption="pip clip", origin=AssetOrigin.generated)
+    timeline = client.post("/timelines", json={"title": "With PiP"}).json()
+    doc = {
+        "video_tracks": [
+            [_clip(0, 0, 4000, asset_id=str(base.id))],
+            [_clip(1000, 0, 2000, asset_id=str(pip.id))],
+        ],
+    }
+    response = client.put(
+        f"/timelines/{timeline['id']}", json={"doc": doc, "base_version": 1}
+    )
+    assert response.status_code == 200, response.text
+
+    render = client.post(f"/timelines/{timeline['id']}/export").json()["timeline"]
+    assert len(render["overlays"]) == 1
+    overlay = render["overlays"][0]
+    assert overlay["start_ms"] == 1000 and overlay["out_ms"] == 2000
+    assert overlay["origin"] == "generated"
+    assert overlay["asset_uri"] == pip.uri
+
+
+def test_audio_fades_flow_into_export(client, session, dispatcher):
+    video = _seed_asset(session)
+    bed = _seed_asset(session, caption="bed")
+    timeline = client.post("/timelines", json={"title": "Faded"}).json()
+    doc = {
+        "video_tracks": [[_clip(0, 0, 4000, asset_id=str(video.id))]],
+        "audio_tracks": [[{
+            "id": "a1", "asset_id": str(bed.id), "start_ms": 0, "in_ms": 0,
+            "out_ms": 4000, "gain": 1.0, "duck": True,
+            "fade_in_ms": 500, "fade_out_ms": 250,
+        }]],
+    }
+    client.put(f"/timelines/{timeline['id']}", json={"doc": doc, "base_version": 1})
+    render = client.post(f"/timelines/{timeline['id']}/export").json()["timeline"]
+    assert render["music"][0]["fade_in_ms"] == 500
+    assert render["music"][0]["fade_out_ms"] == 250
+
+
+def test_audio_clip_rejects_fades_longer_than_clip():
+    with pytest.raises(ValidationError, match="fade"):
+        TimelineDocument(
+            video_tracks=[[]],
+            audio_tracks=[[{
+                "id": "a", "asset_id": "x", "start_ms": 0, "in_ms": 0,
+                "out_ms": 1000, "fade_in_ms": 800, "fade_out_ms": 400,
+            }]],
+        )
+
+
 # --- Export with trims and text overlays ------------------------------------
 
 

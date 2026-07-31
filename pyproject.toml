@@ -31,11 +31,35 @@ dev = [
     "psycopg[binary]>=3.1",
     # static ffmpeg binary so render tests run without a system install
     "imageio-ffmpeg>=0.5",
+    # the MCP server is CPU-testable end-to-end (tests/test_mcp.py)
+    "mcp>=1.2",
+]
+# YouTube publish (M6): installed where uploads actually run.
+publish = [
+    "google-api-python-client>=2.100",
+    "google-auth>=2.20",
+    "google-auth-oauthlib>=1.0",
+]
+# Prompt enhancement (M18): Qwen3.5-4B GGUF on CPU via llama.cpp.
+enhance = [
+    "llama-cpp-python>=0.2.80",
+]
+# MCP control surface (M21): drive the studio from any MCP-capable LLM.
+mcp = [
+    "mcp>=1.2",
 ]
 # Real sentence embeddings for the asset resolver (CPU); without it the
 # deterministic hashing embedder is used.
 embed = [
     "sentence-transformers>=3.0",
+]
+# Auto-captioning (M24): Florence-2-base (MIT) on CPU describes poster
+# frames for resolver search. Without it caption_stage no-ops with a hint.
+caption = [
+    "transformers>=4.44",
+    "torch>=2.3",
+    "timm>=1.0",
+    "einops>=0.8",
 ]
 # GPU deps install only on the 3090 host: pip install -e ".[gpu]"
 # Never imported at module top level outside lazily-guarded paths.
@@ -55,7 +79,11 @@ packages = [
     "worker_gpu.preprocess",
     "worker_cpu",
     "worker_cpu.ffmpeg",
+    "studio_mcp",
 ]
+
+[tool.setuptools.package-data]
+pipeline_core = ["workflows/*.json"]
 
 [tool.setuptools.package-dir]
 schema = "packages/schema"

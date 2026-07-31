@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import { poll } from "../lib";
 import type {
-  AssetRead,
   CameraPresetRead,
   StoryboardRead,
   StyleTemplateRead,
@@ -8,11 +8,58 @@ import type {
 } from "../types/schema";
 
 const STATUS_STYLES: Record<string, string> = {
-  queued: "bg-zinc-800 text-zinc-300",
-  running: "bg-amber-900/60 text-amber-300",
-  succeeded: "bg-emerald-900/60 text-emerald-300",
-  failed: "bg-red-900/60 text-red-300",
+  queued: "chip-neutral",
+  running: "chip-amber",
+  succeeded: "chip-emerald",
+  failed: "chip-red",
 };
+
+interface ExportProgressInfo {
+  total_ms: number;
+  rendered_ms: number;
+  pct: number;
+  done: boolean;
+}
+
+/** Polls the export stage's -progress metrics while a render is in flight. */
+function ExportProgress({ refId }: { refId: string }) {
+  const [progress, setProgress] = useState<ExportProgressInfo | null>(null);
+
+  useEffect(() => {
+    setProgress(null);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const poll = () =>
+      fetch(`/metrics/exports/${refId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: ExportProgressInfo | null) => {
+          setProgress(data);
+          if (data?.done && timer) clearInterval(timer);
+        })
+        .catch(() => undefined);
+    poll();
+    timer = setInterval(poll, 2000);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [refId]);
+
+  if (!progress) return null;
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-edge bg-surface px-4 py-2">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-btn">
+        <div
+          className={`h-full rounded-full transition-all ${progress.done ? "bg-lime-300" : "bg-amber-400"}`}
+          style={{ width: `${progress.pct}%` }}
+        />
+      </div>
+      <span className="w-32 text-right text-xs text-ink-muted">
+        {progress.done
+          ? "render complete"
+          : `rendering ${progress.pct.toFixed(0)}% · ${(progress.rendered_ms / 1000).toFixed(1)}s / ${(progress.total_ms / 1000).toFixed(1)}s`}
+      </span>
+    </div>
+  );
+}
 
 export default function StoryboardsView({
   projectId,
@@ -25,6 +72,7 @@ export default function StoryboardsView({
   const [styles, setStyles] = useState<StyleTemplateRead[]>([]);
   const [presets, setPresets] = useState<CameraPresetRead[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
@@ -34,10 +82,6 @@ export default function StoryboardsView({
   const [shotSubject, setShotSubject] = useState("");
   const [shotPresets, setShotPresets] = useState<string[]>([]);
   const [shotDuration, setShotDuration] = useState(5);
-  const [shotMode, setShotMode] = useState<"generate" | "pool">("generate");
-  const [poolAssets, setPoolAssets] = useState<AssetRead[]>([]);
-  const [poolPick, setPoolPick] = useState("");
-  const [exportReady, setExportReady] = useState<Record<string, string>>({});
 
   const refresh = useCallback(() => {
     const query = projectId ? `?project_id=${projectId}` : "";
@@ -52,33 +96,10 @@ export default function StoryboardsView({
   useEffect(() => {
     fetch("/styles").then((r) => r.json()).then(setStyles);
     fetch("/presets").then((r) => r.json()).then(setPresets);
-    fetch(projectId ? `/projects/${projectId}/assets` : "/assets")
-      .then((r) => r.json())
-      .then((all: AssetRead[]) =>
-        setPoolAssets(all.filter((a) => /\.(mp4|webm|mov|mkv)$/i.test(a.uri ?? ""))),
-      );
-    refresh();
-    const timer = setInterval(refresh, 2500);
-    return () => clearInterval(timer);
-  }, [refresh, projectId]);
+    return poll(refresh, 2500);
+  }, [refresh]);
 
   const board = boards.find((b) => b.id === selectedId) ?? null;
-
-  useEffect(() => {
-    if (!board?.id) return;
-    const check = () =>
-      fetch(`/storyboards/${board.id}/export/status`)
-        .then((r) => r.json())
-        .then(({ ready, url }) =>
-          setExportReady((current) =>
-            ready ? { ...current, [board.id!]: url } : current,
-          ),
-        )
-        .catch(() => undefined);
-    check();
-    const timer = setInterval(check, 3000);
-    return () => clearInterval(timer);
-  }, [board?.id]);
 
   const api = (path: string, init?: RequestInit) =>
     fetch(path, init).then(async (r) => {
@@ -105,24 +126,50 @@ export default function StoryboardsView({
 
   const addShot = () => {
     if (!board) return;
-    const pooled = shotMode === "pool" ? poolAssets.find((a) => a.id === poolPick) : null;
     api(`/storyboards/${board.id}/shots`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         idx: board.shots?.length ?? 0,
-        subject: pooled ? (pooled.caption ?? "pooled asset") : shotSubject,
-        preset_ids: pooled ? [] : shotPresets,
-        asset_id: pooled ? pooled.id : null,
-        duration_target_ms: pooled?.duration_ms ?? shotDuration * 1000,
+        subject: shotSubject,
+        preset_ids: shotPresets,
+        duration_target_ms: shotDuration * 1000,
       }),
     })
       .then(() => {
         setShotSubject("");
         setShotPresets([]);
-        setPoolPick("");
       })
       .catch((e: Error) => setError(e.message));
+  };
+
+  const dropOn = (targetId: string) => {
+    if (!board || !dragId || dragId === targetId) return;
+    const ids = (board.shots ?? []).map((s) => s.id!);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(targetId);
+    if (from === -1 || to === -1) return;
+    ids.splice(to, 0, ...ids.splice(from, 1));
+    setDragId(null);
+    // optimistic: reflect the new order immediately so a second drag never
+    // computes its permutation from a stale list while the POST is in flight
+    setBoards((current) =>
+      current.map((b) =>
+        b.id === board.id
+          ? {
+              ...b,
+              shots: ids.map(
+                (id, index) => ({ ...(b.shots ?? []).find((s) => s.id === id)!, idx: index }),
+              ),
+            }
+          : b,
+      ),
+    );
+    api(`/storyboards/${board.id}/shots/reorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shot_ids: ids }),
+    }).catch((e: Error) => setError(e.message));
   };
 
   const act = (path: string) =>
@@ -143,13 +190,13 @@ export default function StoryboardsView({
   return (
     <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
       <aside className="space-y-4">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-          <h3 className="mb-3 text-sm font-medium text-zinc-300">New storyboard</h3>
+        <div className="rounded-2xl border border-edge bg-surface p-4">
+          <h3 className="mb-3 text-sm font-semibold tracking-tight text-ink">New storyboard</h3>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Video title"
-            className="mb-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600"
+            className="mb-2 w-full rounded-lg border border-edge bg-field px-3 py-2 text-sm placeholder-ink-faint"
           />
           <div className="mb-2 flex gap-1">
             {(["long", "short"] as const).map((f) => (
@@ -157,7 +204,7 @@ export default function StoryboardsView({
                 key={f}
                 onClick={() => setFormat(f)}
                 className={`flex-1 rounded-lg px-2 py-1.5 text-xs ${
-                  format === f ? "bg-zinc-100 text-zinc-900" : "bg-zinc-800 text-zinc-400"
+                  format === f ? "bg-lime-300 text-black" : "bg-btn text-ink-muted"
                 }`}
               >
                 {f === "long" ? "Long 16:9" : "Short 9:16"}
@@ -167,7 +214,7 @@ export default function StoryboardsView({
           <select
             value={styleId}
             onChange={(e) => setStyleId(e.target.value)}
-            className="mb-3 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-2 text-sm"
+            className="mb-3 w-full rounded-lg border border-edge bg-field px-2 py-2 text-sm"
           >
             <option value="">No style template</option>
             {styles.map((s) => (
@@ -177,7 +224,7 @@ export default function StoryboardsView({
           <button
             onClick={createBoard}
             disabled={title.trim().length < 2}
-            className="w-full rounded-lg bg-emerald-600 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+            className="w-full rounded-lg bg-lime-300 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40"
           >
             Create
           </button>
@@ -188,10 +235,10 @@ export default function StoryboardsView({
               key={b.id}
               onClick={() => setSelectedId(b.id!)}
               className={`w-full rounded-lg px-3 py-2 text-left text-sm ${
-                b.id === selectedId ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900"
+                b.id === selectedId ? "bg-btn text-ink" : "text-ink-muted hover:bg-surface2"
               }`}
             >
-              <span className="mr-2 rounded bg-zinc-700 px-1.5 py-0.5 text-[10px] uppercase">
+              <span className="mr-2 rounded bg-btn-hover px-1.5 py-0.5 text-[10px] uppercase">
                 {b.format}
               </span>
               {b.title}
@@ -202,28 +249,18 @@ export default function StoryboardsView({
 
       <section>
         {!board ? (
-          <p className="text-sm text-zinc-600">Create a storyboard to plan a video shot by shot.</p>
+          <p className="text-sm text-ink-faint">Create a storyboard to plan a video shot by shot.</p>
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-medium">{board.title}</h2>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-ink-muted">
                   {board.format === "short" ? "Short · 9:16 · max 60s" : "Full-length · 16:9"}
                   {board.style_id && ` · style: ${board.style_id}`} · {board.shots?.length ?? 0} shots
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                {exportReady[board.id!] && (
-                  <a
-                    href={exportReady[board.id!]}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-lg bg-zinc-100 px-5 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
-                  >
-                    ⬇ Download video
-                  </a>
-                )}
+              <div className="flex gap-2">
                 <button
                   onClick={() =>
                     api(`/storyboards/${board.id}/edit`, { method: "POST" })
@@ -232,7 +269,7 @@ export default function StoryboardsView({
                   }
                   disabled={!allReady}
                   title={allReady ? "Open in the timeline editor" : "All shots need a finished asset first"}
-                  className="rounded-lg bg-zinc-800 px-5 py-2 text-sm font-medium enabled:hover:bg-zinc-700 disabled:opacity-40"
+                  className="rounded-lg bg-btn px-5 py-2 text-sm font-medium enabled:hover:bg-btn-hover disabled:opacity-40"
                 >
                   Edit
                 </button>
@@ -240,24 +277,37 @@ export default function StoryboardsView({
                   onClick={() => act(`/storyboards/${board.id}/export`)}
                   disabled={!allReady}
                   title={allReady ? "Compile and render" : "All shots need a finished asset first"}
-                  className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40"
+                  className="rounded-lg bg-lime-300 px-5 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40"
                 >
-                  {exportReady[board.id!] ? "Re-export" : "Export video"}
+                  Export video
                 </button>
               </div>
             </div>
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error && <p className="text-sm text-danger">{error}</p>}
+            <ExportProgress refId={board.id!} />
 
             <div className="space-y-2">
               {(board.shots ?? []).map((shot) => (
                 <div
                   key={shot.id}
-                  className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
+                  draggable
+                  onDragStart={() => setDragId(shot.id!)}
+                  onDragEnd={() => setDragId(null)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    dropOn(shot.id!);
+                  }}
+                  className={`flex cursor-grab items-center gap-3 rounded-xl border bg-surface px-4 py-3 transition active:cursor-grabbing ${
+                    dragId === shot.id ? "border-lime-300/70 opacity-60" : "border-edge"
+                  }`}
+                  title="Drag to reorder"
                 >
-                  <span className="w-6 text-xs text-zinc-500">#{shot.idx + 1}</span>
+                  <span className="select-none text-ink-faint">⋮⋮</span>
+                  <span className="w-6 text-xs text-ink-muted">#{shot.idx + 1}</span>
                   <div className="flex-1">
-                    <p className="text-sm text-zinc-200">{shot.subject}</p>
-                    <p className="text-xs text-zinc-500">
+                    <p className="text-sm text-ink">{shot.subject}</p>
+                    <p className="text-xs text-ink-muted">
                       {(shot.preset_ids ?? []).join(" + ")} · {(shot.duration_target_ms ?? 0) / 1000}s
                     </p>
                   </div>
@@ -266,11 +316,11 @@ export default function StoryboardsView({
                       {shot.generation_status}
                     </span>
                   ) : (
-                    <span className="text-xs text-zinc-600">not generated</span>
+                    <span className="text-xs text-ink-faint">not generated</span>
                   )}
                   <button
                     onClick={() => act(`/storyboards/${board.id}/shots/${shot.id}/generate`)}
-                    className="rounded bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
+                    className="rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
                   >
                     {shot.generation_id ? "Regenerate" : "Generate"}
                   </button>
@@ -280,7 +330,7 @@ export default function StoryboardsView({
                         (e: Error) => setError(e.message),
                       )
                     }
-                    className="rounded bg-red-900/40 px-2 py-1 text-xs text-red-300 hover:bg-red-800/40"
+                    className="rounded chip-red px-2 py-1 text-xs hover:opacity-75"
                   >
                     ✕
                   </button>
@@ -288,88 +338,47 @@ export default function StoryboardsView({
               ))}
             </div>
 
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-              <div className="mb-2 flex items-center gap-3">
-                <h3 className="text-sm font-medium text-zinc-300">Add shot</h3>
-                <div className="flex gap-1 text-xs">
-                  {(["generate", "pool"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setShotMode(m)}
-                      className={`rounded-full px-3 py-1 ${
-                        shotMode === m ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
-                      }`}
-                    >
-                      {m === "generate" ? "Generate new" : "From asset pool"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {shotMode === "generate" ? (
-                <>
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    {presets.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => toggleShotPreset(p.id)}
-                        className={`rounded-full px-2.5 py-1 text-xs ${
-                          shotPresets.includes(p.id)
-                            ? "bg-emerald-900/60 text-emerald-300 ring-1 ring-emerald-600"
-                            : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-                        }`}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      value={shotSubject}
-                      onChange={(e) => setShotSubject(e.target.value)}
-                      placeholder="Shot subject — e.g. hands typing on a keyboard"
-                      className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm placeholder-zinc-600"
-                    />
-                    <input
-                      type="number"
-                      min={2}
-                      max={30}
-                      value={shotDuration}
-                      onChange={(e) => setShotDuration(Number(e.target.value))}
-                      className="w-20 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
-                      title="Duration (seconds)"
-                    />
-                    <button
-                      onClick={addShot}
-                      disabled={shotSubject.trim().length < 2 || shotPresets.length === 0}
-                      className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 enabled:hover:bg-white disabled:opacity-40"
-                    >
-                      Add
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="flex gap-2">
-                  <select
-                    value={poolPick}
-                    onChange={(e) => setPoolPick(e.target.value)}
-                    className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
-                  >
-                    <option value="">Pick a finished clip…</option>
-                    {poolAssets.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.caption ?? a.uri} {a.duration_ms != null && `(${(a.duration_ms / 1000).toFixed(1)}s)`}
-                      </option>
-                    ))}
-                  </select>
+            <div className="rounded-2xl border border-edge bg-surface p-4">
+              <h3 className="mb-2 text-sm font-semibold tracking-tight text-ink">Add shot</h3>
+              <div className="mb-2 flex flex-wrap gap-1">
+                {presets.map((p) => (
                   <button
-                    onClick={addShot}
-                    disabled={!poolPick}
-                    className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 enabled:hover:bg-white disabled:opacity-40"
+                    key={p.id}
+                    onClick={() => toggleShotPreset(p.id)}
+                    className={`rounded-full px-2.5 py-1 text-xs ${
+                      shotPresets.includes(p.id)
+                        ? "chip-emerald ring-1 ring-emerald-400/40"
+                        : "bg-btn text-ink-muted hover:text-ink"
+                    }`}
                   >
-                    Add
+                    {p.label}
                   </button>
-                </div>
-              )}
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={shotSubject}
+                  onChange={(e) => setShotSubject(e.target.value)}
+                  placeholder="Shot subject — e.g. hands typing on a keyboard"
+                  className="flex-1 rounded-lg border border-edge bg-field px-3 py-2 text-sm placeholder-ink-faint"
+                />
+                <input
+                  type="number"
+                  min={2}
+                  max={30}
+                  value={shotDuration}
+                  onChange={(e) => setShotDuration(Number(e.target.value))}
+                  className="w-20 rounded-lg border border-edge bg-field px-3 py-2 text-sm"
+                  title="Duration (seconds)"
+                />
+                <button
+                  onClick={addShot}
+                  disabled={shotSubject.trim().length < 2 || shotPresets.length === 0}
+                  className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200 enabled:hover:bg-white disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
             </div>
           </div>
         )}

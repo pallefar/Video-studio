@@ -138,23 +138,28 @@ async def timeline_media(
 ):
     """Presigned playback URLs per asset so the editor previews without any
     further server round-trips. Prefers the 720p ingest proxy (M14) when one
-    exists — cheaper decode, always browser-safe."""
+    exists — cheaper decode, always browser-safe. Audio-track assets are
+    included so the editor's transport can play music beds too."""
     timeline = _get_or_404(session, timeline_id)
     urls: dict[str, str] = {}
-    for track in timeline.doc.video_tracks:
-        for clip in track:
-            if clip.asset_id in urls:
-                continue
-            asset = session.get(Asset, uuid.UUID(clip.asset_id))
-            if asset is None:
-                continue
-            proxy_key = f"assets/derived/{clip.asset_id}/proxy.mp4"
-            if store.exists(proxy_key):
-                urls[clip.asset_id] = store.presign_get(proxy_key)
-                continue
-            bucket, key = ObjectStore.parse_uri(asset.uri)
-            if bucket == store.bucket:
-                urls[clip.asset_id] = store.presign_get(key)
+    clips = [
+        clip
+        for track in [*timeline.doc.video_tracks, *timeline.doc.audio_tracks]
+        for clip in track
+    ]
+    for clip in clips:
+        if clip.asset_id in urls:
+            continue
+        asset = session.get(Asset, uuid.UUID(clip.asset_id))
+        if asset is None:
+            continue
+        proxy_key = f"assets/derived/{clip.asset_id}/proxy.mp4"
+        if store.exists(proxy_key):
+            urls[clip.asset_id] = store.presign_get(proxy_key)
+            continue
+        bucket, key = ObjectStore.parse_uri(asset.uri)
+        if bucket == store.bucket:
+            urls[clip.asset_id] = store.presign_get(key)
     return urls
 
 
@@ -219,6 +224,21 @@ async def export_timeline(
                 )
             music.append({**clip.model_dump(), "asset_uri": asset.uri})
 
+    # Overlay track (video_tracks[1], M15 post-MVP): rendered as PiP by the
+    # compiler. Origin rides along — a generated overlay forces C1 like a
+    # generated shot.
+    overlays = []
+    for track in doc.video_tracks[1:2]:
+        for clip in sorted(track, key=lambda c: c.start_ms):
+            asset = session.get(Asset, uuid.UUID(clip.asset_id))
+            if asset is None:
+                raise HTTPException(
+                    status_code=409, detail=f"overlay clip {clip.id} references a missing asset"
+                )
+            overlays.append(
+                {**clip.model_dump(), "asset_uri": asset.uri, "origin": asset.origin.value}
+            )
+
     render_timeline = {
         "storyboard_id": str(timeline.storyboard_id) if timeline.storyboard_id else str(timeline.id),
         "timeline_id": str(timeline.id),
@@ -231,6 +251,7 @@ async def export_timeline(
         "transition_ms": doc.transition_ms,
         "shots": shots,
         "music": music,
+        "overlays": overlays,
         "texts": [text.model_dump() for text in sorted(doc.texts, key=lambda t: t.start_ms)],
     }
     dispatcher.enqueue(

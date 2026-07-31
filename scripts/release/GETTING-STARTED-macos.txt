@@ -1,0 +1,31 @@
+Video Studio — getting started on macOS
+=======================================
+
+Prerequisites
+  - Docker Desktop (for Postgres / Redis / MinIO)
+  - Python 3.11+
+  - ffmpeg is installed automatically by the setup script when missing
+  - Node is NOT required: this bundle ships the control panel prebuilt
+    (web/dist) and the API serves it itself.
+
+First run
+  1. unzip, then in Terminal:
+       cd video-studio-<version>
+       ./scripts/setup.sh --start
+     The script checks every dependency, installs what's missing, starts
+     docker services, prepares the database and bucket, and launches the
+     studio.
+  2. open http://127.0.0.1:8000 — the Settings tab shows what's configured.
+
+On a Mac (no CUDA) the studio runs in dev-engine mode by default paths:
+placeholder voice/lipsync/generation so every flow works end to end
+(docs/mac-dev.md). Real rendering happens on the GPU workstation —
+docs/workstation.md is the runbook (ComfyUI install, model weights,
+node packs).
+
+Configuration lives in .env (copy .env.example). API keys (fal.ai,
+ElevenLabs, Pexels, YouTube) are optional — features appear when their
+key is set.
+
+Upgrading: unzip the new release next to the old one and copy your .env
+across. The database migrates automatically on API start (alembic).

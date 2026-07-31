@@ -49,8 +49,12 @@ class AssetOrigin(str, Enum):
 class GenerationKind(str, Enum):
     text_to_video = "text_to_video"
     image_to_video = "image_to_video"
+    video_to_video = "video_to_video"  # VFX restyle lane (M13)
     image = "image"
     upscale = "upscale"
+    music = "music"  # ACE-Step music beds (M18)
+    talking_image = "talking_image"  # still + voice/song -> talking/singing photo (M28)
+    voice = "voice"  # standalone Chatterbox voiceover lines (M28)
 
 
 class GenerationStatus(str, Enum):
@@ -58,11 +62,29 @@ class GenerationStatus(str, Enum):
     running = "running"
     succeeded = "succeeded"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class VideoFormat(str, Enum):
     long = "long"      # 16:9 1920x1080, full-length
     short = "short"    # 9:16 1080x1920, <= 60 s (Shorts/Reels/TikTok)
+
+
+class ProjectKind(str, Enum):
+    """What the project produces — one studio, many production types."""
+
+    video = "video"    # channel/social videos (the original flow)
+    movie = "movie"    # long-form, multi-scene film work
+    game = "game"      # game dev assets: sprites, textures, cutscenes, trailers
+    other = "other"    # anything else the pipeline serves
+
+
+class IdentityTrainingStatus(str, Enum):
+    untrained = "untrained"
+    queued = "queued"
+    training = "training"
+    trained = "trained"
+    failed = "failed"
 
 
 # Stage names used for idempotency keys — see pipeline_core.queues.stage_key.
@@ -188,6 +210,12 @@ class BaseLoop(BaseLoopBase, table=True):
     __tablename__ = "base_loops"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    # Loop preprocessing results (M2): VFR sources are rejected at ingest;
+    # a seam pop switches playback to the ping-pong variant.
+    vfr_ratio: Optional[float] = None
+    seam_score: Optional[float] = None
+    ping_pong: bool = False
+    error: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -197,6 +225,10 @@ class BaseLoopCreate(BaseLoopBase):
 
 class BaseLoopRead(BaseLoopBase):
     id: uuid.UUID
+    vfr_ratio: Optional[float] = None
+    seam_score: Optional[float] = None
+    ping_pong: bool = False
+    error: Optional[str] = None
     created_at: datetime
 
 
@@ -229,6 +261,8 @@ class RenderJob(RenderJobBase, table=True):
         sa_column=Column(PydanticJSON(PublishConfig), nullable=False),
     )
     error: Optional[str] = None
+    # Assembled render (M4): set when assemble completes; feeds the M7 preview.
+    output_uri: Optional[str] = None
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -245,6 +279,9 @@ class SegmentBase(SQLModel):
     audio_uri: Optional[str] = None
     duration_ms: Optional[int] = None
     seed: Optional[int] = None
+    # Speak-style delivery preset (M18); validated against
+    # pipeline_core.emotions at the API edge. None = neutral.
+    emotion: Optional[str] = None
 
 
 class Segment(SegmentBase, table=True):
@@ -266,6 +303,7 @@ class RenderJobRead(RenderJobBase):
     watermark: WatermarkConfig
     publish: PublishConfig
     error: Optional[str] = None
+    output_uri: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     segments: list[SegmentRead] = []
@@ -289,10 +327,19 @@ class PublishRecordBase(SQLModel):
 
 
 class PublishRecord(PublishRecordBase, table=True):
+    """C4 provenance. Exactly one subject: an avatar RenderJob (the M6 flow)
+    OR a library asset (timeline/storyboard exports) — enforced by a DB
+    check constraint (migration 0013) and the publish routes."""
+
     __tablename__ = "publish_records"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    job_id: uuid.UUID = Field(foreign_key="render_jobs.id", nullable=False, unique=True)
+    job_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="render_jobs.id", nullable=True, unique=True
+    )
+    asset_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="assets.id", nullable=True, unique=True
+    )
     youtube_id: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
@@ -304,7 +351,8 @@ class PublishRecordCreate(PublishRecordBase):
 
 class PublishRecordRead(PublishRecordBase):
     id: uuid.UUID
-    job_id: uuid.UUID
+    job_id: Optional[uuid.UUID] = None
+    asset_id: Optional[uuid.UUID] = None
     youtube_id: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: datetime
@@ -395,6 +443,18 @@ class StyleTemplateRead(BaseModel):
     params: dict = {}
 
 
+class EffectPresetRead(BaseModel):
+    """One-click VFX applied to existing footage over the VACE v2v lane
+    (M13); stacks with camera presets — the Higgsfield 'Mix' mechanic."""
+
+    id: str
+    label: str
+    description: str
+    category: str
+    prompt_template: str
+    stackable: bool = True
+
+
 # ---------------------------------------------------------------------------
 # Project — the container: asset center first, video center after (M20).
 # Assets link many-to-many so one asset serves any number of projects and
@@ -405,6 +465,10 @@ class StyleTemplateRead(BaseModel):
 class ProjectBase(SQLModel):
     title: str
     description: Optional[str] = None
+    kind: ProjectKind = Field(
+        default=ProjectKind.video,
+        sa_column=Column(sa.Enum(ProjectKind, native_enum=False, length=16), nullable=False),
+    )
 
 
 class Project(ProjectBase, table=True):
@@ -464,7 +528,9 @@ class StoryboardCreate(StoryboardBase):
 
 
 class ShotBase(SQLModel):
-    idx: int
+    # non-negative: the reorder endpoint parks shots on negative idx values
+    # mid-renumber, so user-supplied idx must never live there
+    idx: int = Field(ge=0)
     subject: str
     preset_ids: list[str] = Field(default_factory=list, sa_column=Column(sa.JSON, nullable=False))
     duration_target_ms: int = 5000
@@ -523,6 +589,11 @@ class Generation(GenerationBase, table=True):
     error: Optional[str] = None
     asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
     project_id: Optional[uuid.UUID] = Field(default=None, foreign_key="projects.id")
+    # Face-bearing generation: set only after the C6 consent gate has passed.
+    identity_id: Optional[uuid.UUID] = Field(default=None, foreign_key="identities.id")
+    # v2v/upscale (M13): the library asset this generation derives from —
+    # the provenance chain walks output asset -> generation -> source asset.
+    source_asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -531,6 +602,10 @@ class GenerationCreate(GenerationBase):
     params: Optional[dict] = None
     fallback: list[GenerationTarget] = []
     project_id: Optional[uuid.UUID] = None
+    identity_id: Optional[uuid.UUID] = None
+    # M18: enhance the prompt before generation; both prompts are recorded
+    # (raw in params.prompt_raw, enhanced as the generation prompt).
+    enhance: bool = False
 
 
 class GenerationRead(GenerationBase):
@@ -543,6 +618,77 @@ class GenerationRead(GenerationBase):
     error: Optional[str] = None
     asset_id: Optional[uuid.UUID] = None
     project_id: Optional[uuid.UUID] = None
+    identity_id: Optional[uuid.UUID] = None
+    source_asset_id: Optional[uuid.UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Identity — "Soul ID" equivalent (M17). Identity training and face-bearing
+# generation require recorded consent (C6, roadmap-v2 §8) — structural, like
+# C1–C5: enforced in api/validators/compliance.py at the API edge and again
+# in the wan-lane worker. No face-swap of third parties.
+# ---------------------------------------------------------------------------
+
+
+class IdentityBase(SQLModel):
+    name: str
+    description: Optional[str] = None
+
+
+class Identity(IdentityBase, table=True):
+    __tablename__ = "identities"
+    __table_args__ = (UniqueConstraint("name", name="uq_identity_name"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    # Library assets (origin='own') used as training references.
+    reference_asset_ids: list[str] = Field(
+        default_factory=list, sa_column=Column(sa.JSON, nullable=False)
+    )
+    # Consent is append-once: recorded via POST /identities/{id}/consent and
+    # never editable afterwards. Both fields set together, or neither.
+    consent_recorded_by: Optional[str] = None
+    consent_at: Optional[datetime] = None
+    consent_note: Optional[str] = None
+    training_status: IdentityTrainingStatus = Field(
+        default=IdentityTrainingStatus.untrained,
+        sa_column=Column(sa.Enum(IdentityTrainingStatus, native_enum=False, length=16), nullable=False),
+    )
+    lora_uri: Optional[str] = None
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class IdentityCreate(IdentityBase):
+    reference_asset_ids: list[uuid.UUID] = []
+
+
+class ConsentRecord(BaseModel):
+    """One person's recorded consent to train and use their likeness."""
+
+    recorded_by: str
+    note: Optional[str] = None
+
+    @field_validator("recorded_by")
+    @classmethod
+    def _non_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("C6: consent must name who recorded it")
+        return v.strip()
+
+
+class IdentityRead(IdentityBase):
+    id: uuid.UUID
+    reference_asset_ids: list[uuid.UUID] = []
+    consent_recorded_by: Optional[str] = None
+    consent_at: Optional[datetime] = None
+    consent_note: Optional[str] = None
+    has_consent: bool = False
+    training_status: IdentityTrainingStatus
+    lora_uri: Optional[str] = None
+    error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -551,6 +697,38 @@ class GenerationRead(GenerationBase):
 # Metrics — every stage logs its duration; throughput regressions are how
 # thermal throttling shows up (v1 convention, docs/psd.md §7).
 # ---------------------------------------------------------------------------
+
+
+class SavedPromptBase(SQLModel):
+    """M27: the user's prompt library — saved by hand, distilled from the
+    catalog, or reverse-engineered from a library asset."""
+
+    title: str
+    text: str
+    kind: str = "video"  # video | image | music
+    negative: Optional[str] = None
+    source: str = "manual"  # manual | reverse | catalog
+
+
+class SavedPrompt(SavedPromptBase, table=True):
+    __tablename__ = "saved_prompts"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    tags: Optional[list[str]] = Field(default=None, sa_column=Column(sa.JSON, nullable=True))
+    asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class SavedPromptCreate(SavedPromptBase):
+    tags: Optional[list[str]] = None
+    asset_id: Optional[uuid.UUID] = None
+
+
+class SavedPromptRead(SavedPromptBase):
+    id: uuid.UUID
+    tags: Optional[list[str]] = None
+    asset_id: Optional[uuid.UUID] = None
+    created_at: datetime
 
 
 class Metric(SQLModel, table=True):
@@ -587,7 +765,8 @@ class TimelineClip(BaseModel):
 
 
 class AudioClip(BaseModel):
-    """Music/audio-bed clip. Ducked under shot audio by default (M18)."""
+    """Music/audio-bed clip. Ducked under shot audio by default (M18);
+    fade_in/out are applied by the M16 compiler before gain/delay."""
 
     id: str
     asset_id: str
@@ -596,6 +775,8 @@ class AudioClip(BaseModel):
     out_ms: int
     gain: float = 1.0
     duck: bool = True
+    fade_in_ms: int = 0
+    fade_out_ms: int = 0
 
     @model_validator(mode="after")
     def _valid_range(self) -> "AudioClip":
@@ -605,6 +786,10 @@ class AudioClip(BaseModel):
             raise ValueError("clip out_ms must be greater than in_ms")
         if not 0.0 <= self.gain <= 4.0:
             raise ValueError("gain must be within [0, 4]")
+        if self.fade_in_ms < 0 or self.fade_out_ms < 0:
+            raise ValueError("fades must be non-negative")
+        if self.fade_in_ms + self.fade_out_ms > self.out_ms - self.in_ms:
+            raise ValueError("fades cannot exceed the clip length")
         return self
 
 
@@ -687,6 +872,8 @@ EXPORTED_ENUMS: list[type[Enum]] = [
     GenerationKind,
     GenerationStatus,
     VideoFormat,
+    IdentityTrainingStatus,
+    ProjectKind,
 ]
 
 EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
@@ -709,6 +896,10 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     LoraRef,
     CameraPresetRead,
     StyleTemplateRead,
+    EffectPresetRead,
+    IdentityCreate,
+    IdentityRead,
+    ConsentRecord,
     ShotCreate,
     ShotRead,
     StoryboardCreate,

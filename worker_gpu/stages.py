@@ -15,12 +15,13 @@ from sqlmodel import select
 
 from pipeline_core.chunking import chunk_windows
 from pipeline_core.db import advance_job, fail_job, open_session
+from pipeline_core.emotions import emotion_params
 from pipeline_core.metrics import timed_stage
 from pipeline_core.dispatch import Dispatcher, get_redis
 from pipeline_core.locks import HOLDER_RENDER, GpuLockHeld, gpu_lock
 from pipeline_core.queues import QUEUE_CPU, QUEUE_GPU, stage_key
 from pipeline_core.storage import ObjectStore
-from schema.models import JobStatus, RenderJob, Segment
+from schema.models import Identity, IdentityTrainingStatus, JobStatus, RenderJob, Segment, utcnow
 
 log = structlog.get_logger()
 
@@ -32,13 +33,21 @@ _engines = None
 def get_engines():
     global _engines
     if _engines is None:
-        from worker_gpu.engines.lipsync import MuseTalkEngine
-        from worker_gpu.engines.tts import ChatterboxEngine
+        from pipeline_core.settings import Settings
 
         store = ObjectStore()
-        tts = ChatterboxEngine(store)
+        if Settings().dev_engines:
+            # DEV_ENGINES=1: placeholder engines so the full pipeline runs
+            # without CUDA (Apple Silicon / CI). Loudly non-production.
+            from worker_gpu.engines.dev import DevLipsyncEngine, DevTTSEngine
+
+            tts, lipsync = DevTTSEngine(store), DevLipsyncEngine(store)
+        else:
+            from worker_gpu.engines.lipsync import MuseTalkEngine
+            from worker_gpu.engines.tts import ChatterboxEngine
+
+            tts, lipsync = ChatterboxEngine(store), MuseTalkEngine(store)
         tts.load()
-        lipsync = MuseTalkEngine(store)
         lipsync.load()
         _engines = (tts, lipsync)
     return _engines
@@ -75,7 +84,8 @@ def tts_stage(job_id: str) -> None:
             with gpu_lock(get_redis(), HOLDER_RENDER):
                 for segment in pending:
                     audio_uri, duration_ms = tts_engine.synthesize_segment(
-                        job_id, segment.idx, segment.text, segment.seed
+                        job_id, segment.idx, segment.text, segment.seed,
+                        emotion=emotion_params(segment.emotion),
                     )
                     segment.audio_uri = audio_uri
                     segment.duration_ms = duration_ms
@@ -136,3 +146,80 @@ def generation_stage_local(generation_id: str) -> None:
 
     with gpu_lock(get_redis(), HOLDER_WAN):
         run_generation(generation_id)
+
+
+@timed_stage("generation")
+def generation_stage_shared(generation_id: str) -> None:
+    """Shared-lane generation (M18): rides the render queue under the render
+    holder — ACE-Step and the other shared residents never take the wan
+    lane's exclusive lock, and can never run concurrently with it."""
+    from pipeline_core.generation import run_generation
+
+    with gpu_lock(get_redis(), HOLDER_RENDER):
+        run_generation(generation_id)
+
+
+# Cached like the render engines: the trainer loads once per worker process.
+_trainer = None
+
+
+def get_trainer():
+    global _trainer
+    if _trainer is None:
+        from worker_gpu.engines.identity import IdentityLoraTrainer
+
+        _trainer = IdentityLoraTrainer(ObjectStore())
+        _trainer.load()
+    return _trainer
+
+
+@timed_stage("identity_train")
+def identity_training_stage(identity_id: str) -> None:
+    """Identity LoRA training (M17): wan lane, exclusive GPU lock, overnight
+    batch. C6 defence in depth — the API edge already refused unconsented
+    identities, but the worker re-checks so no path around the route (a raw
+    enqueue, a replayed job) can train without recorded consent."""
+    from pipeline_core.locks import HOLDER_WAN
+
+    with open_session() as session:
+        identity = session.get(Identity, uuid.UUID(identity_id))
+        if identity is None:
+            raise ValueError(f"identity {identity_id} not found")
+        if identity.training_status == IdentityTrainingStatus.trained and identity.lora_uri:
+            log.info("identity_train_skip_idempotent", identity_id=identity_id)
+            return
+        if not identity.consent_recorded_by or identity.consent_at is None:
+            identity.training_status = IdentityTrainingStatus.failed
+            identity.error = "C6: no recorded consent — training refused"
+            identity.updated_at = utcnow()
+            session.add(identity)
+            session.commit()
+            raise ValueError(f"C6: identity {identity_id} has no recorded consent")
+
+        identity.training_status = IdentityTrainingStatus.training
+        identity.updated_at = utcnow()
+        session.add(identity)
+        session.commit()
+        try:
+            with gpu_lock(get_redis(), HOLDER_WAN):
+                lora_uri = get_trainer().train(identity_id, list(identity.reference_asset_ids))
+        except GpuLockHeld:
+            identity.training_status = IdentityTrainingStatus.queued
+            identity.updated_at = utcnow()
+            session.add(identity)
+            session.commit()
+            raise  # transient — a re-enqueue resumes it
+        except Exception as exc:
+            identity.training_status = IdentityTrainingStatus.failed
+            identity.error = f"train: {exc}"
+            identity.updated_at = utcnow()
+            session.add(identity)
+            session.commit()
+            raise
+        identity.lora_uri = lora_uri
+        identity.training_status = IdentityTrainingStatus.trained
+        identity.error = None
+        identity.updated_at = utcnow()
+        session.add(identity)
+        session.commit()
+        log.info("identity_train_done", identity_id=identity_id, lora_uri=lora_uri)

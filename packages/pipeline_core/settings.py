@@ -28,3 +28,29 @@ class Settings(BaseSettings):
 
     # Generation providers (M10): same rule — no key, not registered.
     fal_api_key: str = ""
+    # ElevenLabs direct API (roadmap-v2 §3): voice/SFX/music generation as
+    # network jobs. Configuring the key is the per-provider data-egress
+    # decision — prompts/scripts are sent to ElevenLabs when used.
+    elevenlabs_api_key: str = ""
+
+    # YouTube publish (M6): OAuth refresh-token flow. Unconfigured -> the
+    # publish stage waits instead of failing, like a missing ffmpeg.
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
+    youtube_refresh_token: str = ""
+    youtube_token_uri: str = "https://oauth2.googleapis.com/token"
+
+    # Prompt enhancement (M18): path to the Qwen3.5-4B GGUF; empty -> the
+    # deterministic heuristic enhancer is used.
+    qwen_model_path: str = ""
+
+    # Dev engines (DEV_ENGINES=1): placeholder TTS/lipsync/generation so the
+    # full pipeline runs end-to-end on machines without CUDA (Apple Silicon,
+    # CI). Output is watchable but NOT production.
+    dev_engines: bool = False
+
+    # ComfyUI headless — the M10 wan-lane executor. Unconfigured -> local
+    # generation raises a config hint (and declared fallbacks still run).
+    comfy_url: str = ""
+    comfy_poll_interval_s: float = 2.0
+    comfy_timeout_s: int = 3600

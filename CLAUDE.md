@@ -64,7 +64,16 @@ studio, multi-track editor, and a model-provider aggregation layer — see
   instance having been validated.
 
 ## Commands
-- `docker compose up -d` — postgres, redis, minio
+- `./scripts/setup.sh [--start]` — macOS/Linux bootstrap: checks + installs
+  every dependency, prepares DB/bucket. Windows: `scripts/setup.ps1 -Start`,
+  then `scripts/start.ps1`.
+- `docker compose up -d` — postgres, redis, minio (loopback-bound)
+- `./scripts/dev_up.sh` — whole studio on a non-CUDA machine (Apple Silicon
+  Mac, CI): DEV_ENGINES=1 placeholder voice/lipsync, real everything else.
+  See docs/mac-dev.md. Dev engines are opt-in env only — never the default.
+- `python -m studio_mcp` — MCP server: drive the studio from any LLM client
+  (docs/mcp.md). A thin client of the HTTP API — publish/consent/approve
+  are human-only and have no MCP tools, asserted in tests/test_mcp.py.
 - `python scripts/verify_gpu.py` — run before debugging anything GPU-related
 - `python worker_gpu/run.py` — native venv, not compose
 - `pytest tests/test_compliance.py` — must pass before any publish work

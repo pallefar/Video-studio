@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AssetRead,
   AudioClip,
@@ -7,146 +7,256 @@ import type {
   TimelineDocRead,
   TimelineDocument,
 } from "../types/schema";
+import { FrameSource } from "../lib/frameSource";
+import {
+  clipLen,
+  fmtTime,
+  inMs,
+  marqueeHits,
+  nextNeighbourStart,
+  parseSpriteVtt,
+  pasteBase,
+  prevNeighbourEnd,
+  resolveStart,
+  rippleShift,
+  type SpriteCue,
+} from "../lib/timelineOps";
+import { useToast } from "../lib/toast";
+import { Bars } from "./charts";
 
 const PX_PER_MS = 0.06; // base zoom: 60px per second
 const SNAP_PX = 8;
-const LANE_H = 52;
-const LANE_GAP = 8;
+const LANE_H = 56;
+const AUDIO_SUFFIXES = ["wav", "mp3", "m4a", "aac", "ogg", "flac"];
+// Frame stepping matches the M16 compiler's output rate — a "frame" in the
+// editor is a real frame in the export.
+const FPS = 25;
+const FRAME_MS = 1000 / FPS;
+const VIDEO_SUFFIXES = ["mp4", "mov", "webm", "mkv"];
 
-type DragKind =
-  | "move" | "trim-l" | "trim-r"
-  | "audio-move" | "audio-l" | "audio-r"
-  | "text-move" | "text-l" | "text-r";
+// Two selectable layouts (persisted): "studio" is the OpenCut-style panel
+// system — assets | preview | properties over a full-width timeline.
+type EditorLayout = "studio" | "simple";
 
-type Drag = { kind: DragKind; clipId: string; startX: number; orig: any } | null;
+type Drag =
+  | ({ kind: "move" | "trim-l" | "trim-r"; clipId: string; startX: number; orig: TimelineClip } & {
+      recorded?: boolean;
+    })
+  | ({ kind: "ov-move" | "ov-l" | "ov-r"; clipId: string; startX: number; orig: TimelineClip } & {
+      recorded?: boolean;
+    })
+  | ({ kind: "text-move" | "text-l" | "text-r"; clipId: string; startX: number; orig: TextClip } & {
+      recorded?: boolean;
+    })
+  | ({ kind: "audio-move" | "audio-l" | "audio-r"; clipId: string; startX: number; orig: AudioClip } & {
+      recorded?: boolean;
+    })
+  | null;
 
-const inMs = (c: { in_ms?: number }) => c.in_ms ?? 0;
-const clipLen = (c: { in_ms?: number; out_ms: number }) => c.out_ms - inMs(c);
+// Per-asset editor derivatives (M14 ingest fan-out): scrub sprite + cues,
+// waveform peaks.
+interface Extras {
+  sprite?: string;
+  cues?: SpriteCue[];
+  peaks?: number[];
+}
 
-const isAudio = (a: AssetRead) => /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(a.uri ?? "");
-const isVideo = (a: AssetRead) => /\.(mp4|webm|mov|mkv)$/i.test(a.uri ?? "");
+const isTyping = (target: EventTarget | null) =>
+  target instanceof HTMLInputElement ||
+  target instanceof HTMLTextAreaElement ||
+  target instanceof HTMLSelectElement;
 
 export default function EditorView({ openId }: { openId?: string | null }) {
+  const toast = useToast();
   const [timelines, setTimelines] = useState<TimelineDocRead[]>([]);
   const [current, setCurrent] = useState<TimelineDocRead | null>(null);
   const [doc, setDoc] = useState<TimelineDocument | null>(null);
   const [media, setMedia] = useState<Record<string, string>>({});
+  const [extras, setExtras] = useState<Record<string, Extras>>({});
   const [library, setLibrary] = useState<AssetRead[]>([]);
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [zoom, setZoom] = useState(1);
-  const [selected, setSelected] = useState<string | null>(null);
+  // Multi-select (shift-click extends); interaction vocabulary lifted from
+  // OpenCut (MIT) — the licence register's approved editor reference.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [snapOn, setSnapOn] = useState(true);
+  const [layout, setLayoutState] = useState<EditorLayout>(
+    () => (localStorage.getItem("editor_layout") as EditorLayout) || "studio",
+  );
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [assetSearch, setAssetSearch] = useState("");
+  const [snapLine, setSnapLine] = useState<number | null>(null);
+  const [marquee, setMarquee] = useState<{
+    x0: number; y0: number; x1: number; y1: number;
+  } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const [exportUrl, setExportUrl] = useState<string | null>(null);
-  const [addPick, setAddPick] = useState("");
-  const [musicPick, setMusicPick] = useState("");
+  const [hover, setHover] = useState<{
+    clipId: string;
+    x: number;
+    y: number;
+    srcMs: number;
+  } | null>(null);
   const dragRef = useRef<Drag>(null);
+  const rulerScrubRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videosRef = useRef<Record<string, HTMLVideoElement>>({});
+  const audiosRef = useRef<Record<string, HTMLAudioElement>>({});
+  const framesRef = useRef<Record<string, FrameSource>>({});
+  const drawSeqRef = useRef(0);
+  const historyRef = useRef<TimelineDocument[]>([]);
+  const redoRef = useRef<TimelineDocument[]>([]);
+  const clipboardRef = useRef<{
+    video: TimelineClip[];
+    overlay: TimelineClip[];
+    audio: AudioClip[];
+    texts: TextClip[];
+  } | null>(null);
+
+  const setLayout = (next: EditorLayout) => {
+    setLayoutState(next);
+    localStorage.setItem("editor_layout", next);
+  };
 
   const pxPerMs = PX_PER_MS * zoom;
 
+  const disposeFrameSources = useCallback(() => {
+    for (const source of Object.values(framesRef.current)) source.dispose();
+    framesRef.current = {};
+  }, []);
+
+  useEffect(() => disposeFrameSources, [disposeFrameSources]);
+
   const load = useCallback((id: string) => {
+    disposeFrameSources();
     fetch(`/timelines/${id}`)
       .then((r) => r.json())
       .then((t: TimelineDocRead) => {
         setCurrent(t);
         setDoc(structuredClone(t.doc) as TimelineDocument);
         setDirty(false);
-        setSelected(null);
-        setExportUrl(null);
+        setSelectedIds([]);
+        setPlaying(false);
+        setPlayhead(0);
+        historyRef.current = [];
+        redoRef.current = [];
       });
     fetch(`/timelines/${id}/media`).then((r) => r.json()).then(setMedia);
-  }, []);
+  }, [disposeFrameSources]);
 
-  useEffect(() => {
+  const refreshList = useCallback(() => {
     fetch("/timelines").then((r) => r.json()).then(setTimelines);
     fetch("/assets").then((r) => r.json()).then(setLibrary);
-  }, [current?.version]);
+    fetch("/assets/thumbs")
+      .then((r) => (r.ok ? r.json() : {}))
+      .then(setThumbs)
+      .catch(() => undefined);
+  }, []);
 
+  useEffect(refreshList, [refreshList]);
   useEffect(() => {
     if (openId) load(openId);
   }, [openId, load]);
 
-  // export loop closes here: poll until the render exists, then offer download
-  useEffect(() => {
-    if (!current?.id) return;
-    const check = () =>
-      fetch(`/timelines/${current.id}/export/status`)
-        .then((r) => r.json())
-        .then(({ ready, url }) => setExportUrl(ready ? url : null))
-        .catch(() => undefined);
-    check();
-    const timer = setInterval(check, 3000);
-    return () => clearInterval(timer);
-  }, [current?.id]);
-
   const track: TimelineClip[] = doc?.video_tracks?.[0] ?? [];
+  // video_tracks[1] is the overlay lane: rendered by the M16 compiler as a
+  // top-right PiP at 1/3 frame width.
+  const overlayTrack: TimelineClip[] = doc?.video_tracks?.[1] ?? [];
   const audio: AudioClip[] = doc?.audio_tracks?.[0] ?? [];
   const texts: TextClip[] = doc?.texts ?? [];
   const totalMs = Math.max(
     10_000,
     ...track.map((c) => c.start_ms + clipLen(c)),
+    ...overlayTrack.map((c) => c.start_ms + clipLen(c)),
     ...audio.map((c) => c.start_ms + clipLen(c)),
     ...texts.map((t) => t.end_ms),
   );
+  const isShort = doc?.format === "short";
 
-  // play: advance the playhead; the preview effect draws each step
+  // Fetch scrub sprites + waveform peaks once per referenced asset.
   useEffect(() => {
-    if (!playing) return;
-    const timer = setInterval(() => {
-      setPlayhead((p) => {
-        const next = p + 66;
-        if (next >= totalMs) {
-          setPlaying(false);
-          return 0;
-        }
-        return next;
-      });
-    }, 66);
-    return () => clearInterval(timer);
-  }, [playing, totalMs]);
+    if (!doc) return;
+    const ids = new Set([...track, ...overlayTrack, ...audio].map((c) => c.asset_id));
+    for (const id of ids) {
+      if (extras[id] !== undefined) continue;
+      setExtras((e) => ({ ...e, [id]: {} })); // mark in-flight
+      fetch(`/assets/${id}/derived`)
+        .then((r) => (r.ok ? r.json() : {}))
+        .then(async (urls: Record<string, string>) => {
+          const entry: Extras = { sprite: urls.sprite };
+          if (urls.vtt) {
+            entry.cues = parseSpriteVtt(await fetch(urls.vtt).then((r) => r.text()));
+          }
+          if (urls.peaks) {
+            const peaks = await fetch(urls.peaks).then((r) => r.json());
+            entry.peaks = Array.isArray(peaks) ? peaks : (peaks.peaks ?? []);
+          }
+          setExtras((e) => ({ ...e, [id]: entry }));
+        })
+        .catch(() => undefined);
+    }
+  }, [doc, track, audio, extras]);
 
-  const mutate = (fn: (d: TimelineDocument) => void) => {
+  // record=false is for mid-drag updates: the gesture records ONE history
+  // entry on its first move, not one per pixel.
+  const mutate = (fn: (d: TimelineDocument) => void, record = true) => {
     setDoc((d) => {
       if (!d) return d;
+      if (record) {
+        historyRef.current.push(structuredClone(d) as TimelineDocument);
+        if (historyRef.current.length > 100) historyRef.current.shift();
+        redoRef.current = [];
+      }
       const next = structuredClone(d) as TimelineDocument;
-      if (!next.audio_tracks || next.audio_tracks.length === 0) next.audio_tracks = [[]];
-      if (!next.texts) next.texts = [];
       fn(next);
       return next;
     });
     setDirty(true);
   };
 
+  const undo = () => {
+    const prev = historyRef.current.pop();
+    if (!prev || !doc) return;
+    redoRef.current.push(structuredClone(doc) as TimelineDocument);
+    setDoc(prev);
+    setDirty(true);
+  };
+
+  const redo = () => {
+    const next = redoRef.current.pop();
+    if (!next || !doc) return;
+    historyRef.current.push(structuredClone(doc) as TimelineDocument);
+    setDoc(next);
+    setDirty(true);
+  };
+
+  // snap() records what it snapped to so the drag can show OpenCut's snap
+  // indicator line; the ref is flushed to state after each mutate.
+  const lastSnapRef = useRef<number | null>(null);
   const snap = (ms: number, ignoreId: string) => {
+    lastSnapRef.current = null;
+    if (!snapOn) return Math.max(0, Math.round(ms));
     const targets = [0, playhead];
-    for (const c of [...track, ...audio]) {
+    for (const c of [...track, ...overlayTrack, ...audio]) {
       if (c.id === ignoreId) continue;
       targets.push(c.start_ms, c.start_ms + clipLen(c));
     }
     for (const t of targets) {
-      if (Math.abs((ms - t) * pxPerMs) < SNAP_PX) return t;
+      if (Math.abs((ms - t) * pxPerMs) < SNAP_PX) {
+        lastSnapRef.current = t;
+        return t;
+      }
     }
     return Math.max(0, Math.round(ms));
-  };
-
-  const moveTrim = (c: any, o: any, kind: string, dMs: number) => {
-    if (kind.endsWith("move")) {
-      c.start_ms = snap(o.start_ms + dMs, c.id);
-    } else if (kind.endsWith("-l")) {
-      const shift = Math.max(-inMs(o), Math.min(dMs, clipLen(o) - 100));
-      c.in_ms = Math.round(inMs(o) + shift);
-      c.start_ms = snap(o.start_ms + shift, c.id);
-    } else {
-      c.out_ms = Math.round(Math.max(inMs(o) + 100, o.out_ms + dMs));
-    }
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     if (!drag || !doc) return;
+    const record = !drag.recorded;
+    drag.recorded = true;
     const dMs = (e.clientX - drag.startX) / pxPerMs;
     mutate((d) => {
       if (drag.kind.startsWith("text")) {
@@ -163,49 +273,178 @@ export default function EditorView({ openId }: { openId?: string | null }) {
           t.end_ms = Math.max(snap(o.end_ms + dMs, t.id), o.start_ms + 100);
         }
       } else if (drag.kind.startsWith("audio")) {
-        const c = d.audio_tracks![0].find((x) => x.id === drag.clipId);
-        if (c) moveTrim(c, drag.orig, drag.kind, dMs);
+        const lane = d.audio_tracks?.[0];
+        const c = lane?.find((x) => x.id === drag.clipId);
+        const o = drag.orig as AudioClip;
+        if (!c || !lane) return;
+        if (drag.kind === "audio-move") {
+          const start = resolveStart(lane, snap(o.start_ms + dMs, c.id), clipLen(o), c.id);
+          if (start !== null) c.start_ms = start;
+        } else if (drag.kind === "audio-l") {
+          const minStart = prevNeighbourEnd(lane, o.start_ms, c.id);
+          const shift = Math.max(
+            minStart - o.start_ms, Math.max(-inMs(o), Math.min(dMs, clipLen(o) - 100)),
+          );
+          c.in_ms = Math.round(inMs(o) + shift);
+          c.start_ms = Math.max(minStart, snap(o.start_ms + shift, c.id));
+        } else {
+          const cap = nextNeighbourStart(lane, o.start_ms + 1, c.id);
+          const maxOut = cap === Infinity ? Infinity : inMs(o) + (cap - o.start_ms);
+          c.out_ms = Math.round(
+            Math.min(maxOut, Math.max(inMs(o) + 100, o.out_ms + dMs)),
+          );
+        }
+      } else if (drag.kind.startsWith("ov-")) {
+        const lane = d.video_tracks?.[1];
+        const c = lane?.find((x) => x.id === drag.clipId);
+        const o = drag.orig as TimelineClip;
+        if (!c || !lane) return;
+        if (drag.kind === "ov-move") {
+          const start = resolveStart(lane, snap(o.start_ms + dMs, c.id), clipLen(o), c.id);
+          if (start !== null) c.start_ms = start;
+        } else if (drag.kind === "ov-l") {
+          const minStart = prevNeighbourEnd(lane, o.start_ms, c.id);
+          const shift = Math.max(
+            minStart - o.start_ms, Math.max(-inMs(o), Math.min(dMs, clipLen(o) - 100)),
+          );
+          c.in_ms = Math.round(inMs(o) + shift);
+          c.start_ms = Math.max(minStart, snap(o.start_ms + shift, c.id));
+        } else {
+          const cap = nextNeighbourStart(lane, o.start_ms + 1, c.id);
+          const maxOut = cap === Infinity ? Infinity : inMs(o) + (cap - o.start_ms);
+          c.out_ms = Math.round(
+            Math.min(maxOut, Math.max(inMs(o) + 100, o.out_ms + dMs)),
+          );
+        }
       } else {
-        const c = d.video_tracks![0].find((x) => x.id === drag.clipId);
-        if (c) moveTrim(c, drag.orig, drag.kind, dMs);
+        const lane = d.video_tracks![0];
+        const c = lane.find((x) => x.id === drag.clipId);
+        const o = drag.orig as TimelineClip;
+        if (!c) return;
+        if (drag.kind === "move") {
+          const start = resolveStart(lane, snap(o.start_ms + dMs, c.id), clipLen(o), c.id);
+          if (start !== null) c.start_ms = start;
+        } else if (drag.kind === "trim-l") {
+          const minStart = prevNeighbourEnd(lane, o.start_ms, c.id);
+          const shift = Math.max(
+            minStart - o.start_ms, Math.max(-inMs(o), Math.min(dMs, clipLen(o) - 100)),
+          );
+          c.in_ms = Math.round(inMs(o) + shift);
+          c.start_ms = Math.max(minStart, snap(o.start_ms + shift, c.id));
+        } else {
+          const cap = nextNeighbourStart(lane, o.start_ms + 1, c.id);
+          const maxOut = cap === Infinity ? Infinity : inMs(o) + (cap - o.start_ms);
+          c.out_ms = Math.round(
+            Math.min(maxOut, Math.max(inMs(o) + 100, o.out_ms + dMs)),
+          );
+        }
       }
-    });
+    }, record);
+    setSnapLine(lastSnapRef.current);
   };
 
   const grab = (e: React.PointerEvent, drag: NonNullable<Drag>) => {
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragRef.current = drag;
-    setSelected(drag.clipId);
+    setSelectedIds((ids) =>
+      e.shiftKey
+        ? ids.includes(drag.clipId)
+          ? ids.filter((id) => id !== drag.clipId)
+          : [...ids, drag.clipId]
+        : ids.includes(drag.clipId)
+          ? ids // dragging one of a multi-selection keeps the selection
+          : [drag.clipId],
+    );
+    setHover(null);
   };
 
-  const splitSelected = () =>
+  // Which video clips do S/Q/W act on: the selection, else the clip under
+  // the playhead — OpenCut's rule.
+  const splitTargets = (d: TimelineDocument): TimelineClip[] => {
+    const clips = d.video_tracks![0];
+    const chosen = clips.filter((c) => selectedIds.includes(c.id));
+    if (chosen.length > 0) return chosen;
+    return clips.filter(
+      (c) => playhead > c.start_ms && playhead < c.start_ms + clipLen(c),
+    );
+  };
+
+  const splitSelected = (retain: "both" | "left" | "right" = "both") =>
     mutate((d) => {
       const clips = d.video_tracks![0];
-      const c = clips.find((x) => x.id === selected);
-      if (!c) return;
-      const offset = playhead - c.start_ms;
-      if (offset <= 100 || offset >= clipLen(c) - 100) return;
-      clips.push({
-        id: crypto.randomUUID(),
-        asset_id: c.asset_id,
-        start_ms: playhead,
-        in_ms: inMs(c) + offset,
-        out_ms: c.out_ms,
-      });
-      c.out_ms = inMs(c) + offset;
+      for (const c of splitTargets(d)) {
+        const offset = playhead - c.start_ms;
+        if (offset <= 100 || offset >= clipLen(c) - 100) continue;
+        if (retain === "left") {
+          c.out_ms = inMs(c) + offset; // split-right: drop the right side
+        } else if (retain === "right") {
+          c.in_ms = inMs(c) + offset; // split-left: drop the left side
+          c.start_ms = playhead;
+        } else {
+          clips.push({
+            id: crypto.randomUUID(),
+            asset_id: c.asset_id,
+            start_ms: playhead,
+            in_ms: inMs(c) + offset,
+            out_ms: c.out_ms,
+          });
+          c.out_ms = inMs(c) + offset;
+        }
+      }
     });
 
-  const deleteSelected = () =>
+  // ripple=true closes the gap: everything later on EVERY lane shifts left
+  // by the removed span, keeping beds and titles in sync with the cut
+  // (OpenCut's ripple/shift semantics).
+  const deleteSelected = (ripple = false) =>
     mutate((d) => {
-      d.video_tracks![0] = d.video_tracks![0].filter((c) => c.id !== selected);
-      d.audio_tracks![0] = d.audio_tracks![0].filter((c) => c.id !== selected);
-      d.texts = (d.texts ?? []).filter((t) => t.id !== selected);
+      const removedSpans: { start: number; len: number }[] = [];
+      const removing = (id: string) => selectedIds.includes(id);
+      for (const c of d.video_tracks![0]) {
+        if (removing(c.id)) removedSpans.push({ start: c.start_ms, len: clipLen(c) });
+      }
+      d.video_tracks![0] = d.video_tracks![0].filter((c) => !removing(c.id));
+      if (d.video_tracks!.length > 1) {
+        d.video_tracks![1] = d.video_tracks![1].filter((c) => !removing(c.id));
+      }
+      if (d.audio_tracks?.[0]) {
+        d.audio_tracks[0] = d.audio_tracks[0].filter((c) => !removing(c.id));
+      }
+      d.texts = (d.texts ?? []).filter((t) => !removing(t.id));
+      if (!ripple) return;
+      rippleShift(
+        removedSpans,
+        [
+          ...d.video_tracks![0],
+          ...(d.video_tracks!.length > 1 ? d.video_tracks![1] : []),
+          ...(d.audio_tracks?.[0] ?? []),
+        ],
+        d.texts ?? [],
+      );
+    });
+
+  const duplicateSelected = () =>
+    mutate((d) => {
+      const lanes: (TimelineClip | AudioClip)[][] = [
+        d.video_tracks![0],
+        ...(d.video_tracks!.length > 1 ? [d.video_tracks![1]] : []),
+        ...(d.audio_tracks?.length ? [d.audio_tracks[0]] : []),
+      ];
+      for (const lane of lanes) {
+        const chosen = lane.filter((c) => selectedIds.includes(c.id));
+        let end = lane.reduce((e, c) => Math.max(e, c.start_ms + clipLen(c)), 0);
+        for (const c of chosen) {
+          lane.push({ ...structuredClone(c), id: crypto.randomUUID(), start_ms: end });
+          end += clipLen(c);
+        }
+      }
     });
 
   const addText = () =>
     mutate((d) => {
-      d.texts!.push({
+      d.texts = d.texts ?? [];
+      d.texts.push({
         id: crypto.randomUUID(),
         text: "Title text",
         start_ms: playhead,
@@ -214,39 +453,131 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       });
     });
 
-  const addClip = () => {
-    const asset = library.find((a) => a.id === addPick);
-    if (!asset) return;
-    const end = track.reduce((m, c) => Math.max(m, c.start_ms + clipLen(c)), 0);
-    mutate((d) => {
-      d.video_tracks![0].push({
-        id: crypto.randomUUID(),
-        asset_id: asset.id!,
-        start_ms: end,
-        in_ms: 0,
-        out_ms: asset.duration_ms ?? 3000,
-      });
-    });
-    setAddPick("");
-    if (current) fetch(`/timelines/${current.id}/media`).then((r) => r.json()).then(setMedia);
+  const suffixOf = (a: AssetRead) => a.uri.split(".").pop()?.toLowerCase() ?? "";
+  const audioAssets = useMemo(
+    () => library.filter((a) => AUDIO_SUFFIXES.includes(suffixOf(a))),
+    [library],
+  );
+  // the assets panel offers everything the timeline can hold
+  const timelineAssets = useMemo(
+    () =>
+      library.filter(
+        (a) =>
+          (VIDEO_SUFFIXES.includes(suffixOf(a)) || AUDIO_SUFFIXES.includes(suffixOf(a))) &&
+          (!assetSearch ||
+            (a.caption ?? "").toLowerCase().includes(assetSearch.toLowerCase())),
+      ),
+    [library, assetSearch],
+  );
+
+  // the media map won't have a freshly-added asset yet — presign it now so
+  // preview works before the next save/load (prefer the ingest proxy)
+  const ensureMedia = (assetId: string) => {
+    if (media[assetId]) return;
+    fetch(`/assets/${assetId}/derived`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((derived: Record<string, string>) => {
+        if (derived.proxy) {
+          setMedia((m) => ({ ...m, [assetId]: derived.proxy }));
+          return;
+        }
+        return fetch(`/assets/${assetId}/download`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((body) => body?.url && setMedia((m) => ({ ...m, [assetId]: body.url })));
+      })
+      .catch(() => undefined);
   };
 
-  const addMusic = () => {
-    const asset = library.find((a) => a.id === musicPick);
-    if (!asset) return;
+  const addAudio = (asset: AssetRead) => {
     mutate((d) => {
-      d.audio_tracks![0].push({
+      if (!d.audio_tracks || d.audio_tracks.length === 0) d.audio_tracks = [[]];
+      const lane = d.audio_tracks[0];
+      // drop the bed after the last audio clip so the no-overlap rule holds
+      const start = lane.reduce((end, c) => Math.max(end, c.start_ms + clipLen(c)), 0);
+      lane.push({
         id: crypto.randomUUID(),
         asset_id: asset.id!,
-        start_ms: playhead,
+        start_ms: start,
         in_ms: 0,
-        out_ms: asset.duration_ms ?? 10_000,
+        out_ms: Math.max(1000, asset.duration_ms ?? 10_000),
         gain: 1.0,
         duck: true,
       });
     });
-    setMusicPick("");
+    ensureMedia(asset.id!);
   };
+
+  const addClip = (asset: AssetRead, laneIndex: 0 | 1 = 0) => {
+    mutate((d) => {
+      if (laneIndex === 1 && d.video_tracks!.length < 2) d.video_tracks!.push([]);
+      const lane = d.video_tracks![laneIndex];
+      const start = lane.reduce((end, c) => Math.max(end, c.start_ms + clipLen(c)), 0);
+      lane.push({
+        id: crypto.randomUUID(),
+        asset_id: asset.id!,
+        start_ms: start,
+        in_ms: 0,
+        out_ms: Math.max(500, asset.duration_ms ?? 3000),
+      });
+    });
+    ensureMedia(asset.id!);
+  };
+
+  const addAsset = (asset: AssetRead) =>
+    AUDIO_SUFFIXES.includes(suffixOf(asset)) ? addAudio(asset) : addClip(asset);
+
+  const copySelected = () => {
+    if (selectedIds.length === 0) return;
+    clipboardRef.current = {
+      video: track.filter((c) => selectedIds.includes(c.id)).map((c) => ({ ...c })),
+      overlay: overlayTrack.filter((c) => selectedIds.includes(c.id)).map((c) => ({ ...c })),
+      audio: audio.filter((c) => selectedIds.includes(c.id)).map((c) => ({ ...c })),
+      texts: texts.filter((t) => selectedIds.includes(t.id)).map((t) => ({ ...t })),
+    };
+  };
+
+  const pasteClipboard = () => {
+    const clip = clipboardRef.current;
+    if (!clip) return;
+    mutate((d) => {
+      let end = pasteBase(d.video_tracks![0], clip.video, playhead);
+      for (const c of clip.video) {
+        d.video_tracks![0].push({ ...c, id: crypto.randomUUID(), start_ms: end });
+        end += clipLen(c);
+      }
+      if (clip.overlay?.length) {
+        if (d.video_tracks!.length < 2) d.video_tracks!.push([]);
+        let ovEnd = pasteBase(d.video_tracks![1], clip.overlay, playhead);
+        for (const c of clip.overlay) {
+          d.video_tracks![1].push({ ...c, id: crypto.randomUUID(), start_ms: ovEnd });
+          ovEnd += clipLen(c);
+        }
+      }
+      if (clip.audio.length) {
+        if (!d.audio_tracks || d.audio_tracks.length === 0) d.audio_tracks = [[]];
+        let audioEnd = pasteBase(d.audio_tracks[0], clip.audio, playhead);
+        for (const c of clip.audio) {
+          d.audio_tracks[0].push({ ...c, id: crypto.randomUUID(), start_ms: audioEnd });
+          audioEnd += clipLen(c);
+        }
+      }
+      // texts may overlap freely: paste at the playhead, offsets preserved
+      const firstText = Math.min(...clip.texts.map((t) => t.start_ms), Infinity);
+      for (const t of clip.texts) {
+        const shift = playhead - firstText;
+        d.texts = d.texts ?? [];
+        d.texts.push({
+          ...t,
+          id: crypto.randomUUID(),
+          start_ms: Math.max(0, t.start_ms + shift),
+          end_ms: Math.max(100, t.end_ms + shift),
+        });
+      }
+    });
+  };
+
+  const selectAll = () =>
+    setSelectedIds([...track, ...overlayTrack, ...audio, ...texts].map((x) => x.id));
 
   const save = () => {
     if (!current || !doc) return;
@@ -263,22 +594,109 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         setCurrent(t);
         setDirty(false);
         setStatus(`saved v${t.version}`);
+        toast(`Saved v${t.version}`);
       } else {
-        setStatus((await r.json()).detail ?? `HTTP ${r.status}`);
+        const detail = (await r.json()).detail ?? `HTTP ${r.status}`;
+        setStatus(detail);
+        toast(String(detail), "error");
       }
     });
   };
 
   const exportTimeline = () => {
     if (!current) return;
-    fetch(`/timelines/${current.id}/export`, { method: "POST" }).then(async (r) =>
-      setStatus(
-        r.ok
-          ? "export queued — the download button appears here when it's rendered"
-          : ((await r.json()).detail ?? `HTTP ${r.status}`),
-      ),
-    );
+    fetch(`/timelines/${current.id}/export`, { method: "POST" }).then(async (r) => {
+      const detail = r.ok ? "Export queued" : ((await r.json()).detail ?? `HTTP ${r.status}`);
+      setStatus(String(detail));
+      toast(String(detail), r.ok ? "success" : "error");
+    });
   };
+
+  // ---- transport: rAF playhead advance with real-time delta; spacebar toggles
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const delta = now - last;
+      last = now;
+      setPlayhead((p) => {
+        const next = p + delta;
+        if (next >= totalMs) {
+          setPlaying(false);
+          return totalMs;
+        }
+        return next;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, totalMs]);
+
+  // Keyboard vocabulary lifted from OpenCut's defaults: space/K play,
+  // J/L seek, arrows frame-step (shift = jump), home/end, S/Q/W splits,
+  // delete (+shift = ripple), ctrl+D duplicate, N snapping, ctrl+Z/Y.
+  useEffect(() => {
+    const seek = (deltaMs: number) =>
+      setPlayhead((p) => Math.min(totalMs, Math.max(0, p + deltaMs)));
+    const onKey = (e: KeyboardEvent) => {
+      if (isTyping(e.target) || !doc) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      let handled = true;
+      if (mod && key === "z" && e.shiftKey) redo();
+      else if (mod && key === "z") undo();
+      else if (mod && key === "y") redo();
+      else if (mod && key === "d") duplicateSelected();
+      else if (mod && key === "c") copySelected();
+      else if (mod && key === "v") pasteClipboard();
+      else if (mod && key === "a") selectAll();
+      else if (mod) handled = false;
+      else if (e.code === "Space" || key === "k") setPlaying((p) => !p);
+      else if (key === "j") seek(-1000);
+      else if (key === "l") seek(1000);
+      else if (key === "arrowleft") seek(e.shiftKey ? -1000 : -FRAME_MS);
+      else if (key === "arrowright") seek(e.shiftKey ? 1000 : FRAME_MS);
+      else if (key === "home") setPlayhead(0);
+      else if (key === "end") setPlayhead(totalMs);
+      else if (key === "s") splitSelected("both");
+      else if (key === "q") splitSelected("right"); // split-left: keep right
+      else if (key === "w") splitSelected("left"); // split-right: keep left
+      else if (key === "delete" || key === "backspace") deleteSelected(e.shiftKey);
+      else if (key === "n") setSnapOn((s) => !s);
+      else if (key === "escape") setSelectedIds([]);
+      else handled = false;
+      if (handled) e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // ---- ctrl/cmd + wheel zooms the timeline anchored at the cursor (also
+  // catches trackpad pinch, which browsers deliver as ctrl+wheel) — the
+  // OpenCut zoom gesture; the slider stays for coarse control. Native
+  // listener because React's synthetic wheel handlers are passive.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: globalThis.WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const cursorPx = e.clientX - rect.left;
+      const timeAt = (el.scrollLeft + cursorPx) / pxPerMs;
+      setZoom((z) => {
+        const next = Math.min(3, Math.max(0.3, z * Math.exp(-e.deltaY * 0.0015)));
+        requestAnimationFrame(() => {
+          el.scrollLeft = Math.max(0, timeAt * PX_PER_MS * next - cursorPx);
+        });
+        return next;
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [pxPerMs, current?.id]);
 
   // ---- preview: draw the active clip's frame + active texts, no server round-trips
   useEffect(() => {
@@ -290,6 +708,45 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     );
     ctx.fillStyle = "#09090b";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const activeOv = overlayTrack.find(
+      (c) => playhead >= c.start_ms && playhead < c.start_ms + clipLen(c),
+    );
+    const drawOverlays = () => {
+      // A3: PiP preview mirrors the compiler (top-right, 1/3 width)
+      if (activeOv && media[activeOv.asset_id]) {
+        let ov = videosRef.current[activeOv.asset_id];
+        if (!ov) {
+          ov = document.createElement("video");
+          ov.src = media[activeOv.asset_id];
+          ov.muted = true;
+          ov.preload = "auto";
+          videosRef.current[activeOv.asset_id] = ov;
+        }
+        const ovTarget = (playhead - activeOv.start_ms + inMs(activeOv)) / 1000;
+        if (playing) {
+          if (ov.paused) ov.play().catch(() => undefined);
+          if (Math.abs(ov.currentTime - ovTarget) > 0.25) ov.currentTime = ovTarget;
+        } else {
+          if (!ov.paused) ov.pause();
+          if (Math.abs(ov.currentTime - ovTarget) > 0.04) ov.currentTime = ovTarget;
+        }
+        const pw = canvas.width / 3;
+        const ph = (pw * 9) / 16;
+        ctx.drawImage(ov, canvas.width - pw - 8, 8, pw, ph);
+      }
+      for (const t of texts) {
+        if (playhead >= t.start_ms && playhead < t.end_ms) {
+          ctx.font = "16px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillStyle = "rgba(0,0,0,0.5)";
+          const w = ctx.measureText(t.text).width + 16;
+          const y = canvas.height * (t.y_pct ?? 0.8);
+          ctx.fillRect(canvas.width / 2 - w / 2, y - 14, w, 22);
+          ctx.fillStyle = "#fff";
+          ctx.fillText(t.text, canvas.width / 2, y + 2);
+        }
+      }
+    };
     if (active && media[active.asset_id]) {
       let video = videosRef.current[active.asset_id];
       if (!video) {
@@ -304,53 +761,706 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       const target = (playhead - active.start_ms + inMs(active)) / 1000;
       const draw = () => {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        for (const t of texts) {
-          if (playhead >= t.start_ms && playhead < t.end_ms) {
-            ctx.font = "16px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillStyle = "rgba(0,0,0,0.5)";
-            const w = ctx.measureText(t.text).width + 16;
-            const y = canvas.height * (t.y_pct ?? 0.8);
-            ctx.fillRect(canvas.width / 2 - w / 2, y - 14, w, 22);
-            ctx.fillStyle = "#fff";
-            ctx.fillText(t.text, canvas.width / 2, y + 2);
-          }
-        }
+        drawOverlays();
       };
-      if (Math.abs(video.currentTime - target) > 0.04) {
-        video.currentTime = target;
-        video.onseeked = draw;
-      } else {
+      if (playing) {
+        // free-run the decoder and only correct real drift — seeking every
+        // frame would stutter
+        if (video.paused) video.play().catch(() => undefined);
+        if (Math.abs(video.currentTime - target) > 0.25) video.currentTime = target;
         draw();
+      } else {
+        if (!video.paused) video.pause();
+        // Paused/scrub: frame-exact decode via mediabunny + WebCodecs; the
+        // <video> seek path is the fallback when the codec/browser can't.
+        let source = framesRef.current[active.asset_id];
+        if (!source) {
+          source = new FrameSource(media[active.asset_id], canvas.width, canvas.height);
+          framesRef.current[active.asset_id] = source;
+        }
+        const seq = ++drawSeqRef.current;
+        source.draw(ctx, target, canvas.width, canvas.height).then((exact) => {
+          if (seq !== drawSeqRef.current) return; // a newer draw superseded us
+          if (exact) {
+            drawOverlays();
+          } else if (Math.abs(video.currentTime - target) > 0.04) {
+            video.currentTime = target;
+            video.onseeked = draw;
+          } else {
+            draw();
+          }
+        });
       }
+    } else {
+      drawOverlays();
     }
-  }, [playhead, doc, media, track, texts]);
+    // pause every video that is neither the active clip nor the active PiP
+    const activeAssets = new Set(
+      [active?.asset_id, activeOv?.asset_id].filter(Boolean) as string[],
+    );
+    for (const [assetId, video] of Object.entries(videosRef.current)) {
+      if (!activeAssets.has(assetId) && !video.paused) video.pause();
+    }
+  }, [playhead, playing, doc, media, track, overlayTrack, texts]);
 
-  const selectedText = texts.find((t) => t.id === selected);
-  const lanes = 3;
+  // ---- audio beds follow the transport (volume clamped: gain > 1 only
+  // applies at export through the ffmpeg graph)
+  useEffect(() => {
+    const activeIds = new Set<string>();
+    for (const clip of audio) {
+      const within = playhead >= clip.start_ms && playhead < clip.start_ms + clipLen(clip);
+      if (!within || !media[clip.asset_id]) continue;
+      activeIds.add(clip.asset_id);
+      let el = audiosRef.current[clip.asset_id];
+      if (!el) {
+        el = new Audio(media[clip.asset_id]);
+        el.preload = "auto";
+        audiosRef.current[clip.asset_id] = el;
+      }
+      el.volume = Math.min(1, clip.gain ?? 1);
+      const target = (playhead - clip.start_ms + inMs(clip)) / 1000;
+      if (Math.abs(el.currentTime - target) > 0.3) el.currentTime = target;
+      if (playing && el.paused) el.play().catch(() => undefined);
+      if (!playing && !el.paused) el.pause();
+    }
+    for (const [assetId, el] of Object.entries(audiosRef.current)) {
+      if (!activeIds.has(assetId) && !el.paused) el.pause();
+    }
+  }, [playhead, playing, audio, media]);
 
-  const clipBox = (
-    c: { id: string; start_ms: number },
-    width: number,
-    top: number,
+  const soleSelected = selectedIds.length === 1 ? selectedIds[0] : null;
+  const selectedText = texts.find((t) => t.id === soleSelected);
+  const selectedAudio = audio.find((c) => c.id === soleSelected);
+  const hoverClip = hover
+    ? [...track, ...overlayTrack].find((c) => c.id === hover.clipId)
+    : undefined;
+  const hoverExtras = hoverClip ? extras[hoverClip.asset_id] : undefined;
+  const hoverCue =
+    hover && hoverExtras?.cues?.length && hoverExtras.sprite
+      ? (hoverExtras.cues.find((q) => hover.srcMs >= q.start_ms && hover.srcMs < q.end_ms) ??
+        hoverExtras.cues[hoverExtras.cues.length - 1])
+      : undefined;
+
+
+  const lanes = [
+    { top: 0 },                    // video
+    { top: LANE_H + 8 },           // overlay (PiP)
+    { top: (LANE_H + 8) * 2 },     // audio beds
+    { top: (LANE_H + 8) * 3 },     // titles
+  ];
+  const selectedVideoClip =
+    track.find((c) => c.id === soleSelected) ??
+    overlayTrack.find((c) => c.id === soleSelected);
+  const selectedIsOverlay = overlayTrack.some((c) => c.id === soleSelected);
+  const canvasW = isShort ? (layout === "studio" ? 270 : 180) : layout === "studio" ? 640 : 320;
+  const canvasH = isShort ? (layout === "studio" ? 480 : 320) : layout === "studio" ? 360 : 180;
+
+  const timeField = (
     label: string,
-    kinds: [DragKind, DragKind, DragKind],
-    accent = "bg-zinc-800",
+    valueMs: number,
+    apply: (d: TimelineDocument, ms: number) => void,
   ) => (
-    <div
-      key={c.id}
-      onPointerDown={(e) => grab(e, { kind: kinds[0], clipId: c.id, startX: e.clientX, orig: { ...c } })}
-      className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-        selected === c.id ? "border-emerald-500 bg-emerald-950/70" : `border-zinc-600 ${accent}`
-      }`}
-      style={{ left: c.start_ms * pxPerMs, width, top, height: LANE_H - 8 }}
-    >
-      <span className="truncate text-zinc-300">{label}</span>
-      <div onPointerDown={(e) => grab(e, { kind: kinds[1], clipId: c.id, startX: e.clientX, orig: { ...c } })}
-        className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-zinc-500/60" />
-      <div onPointerDown={(e) => grab(e, { kind: kinds[2], clipId: c.id, startX: e.clientX, orig: { ...c } })}
-        className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-zinc-500/60" />
+    <label key={label} className="flex items-center justify-between gap-2 text-xs">
+      <span className="text-ink-faint">{label}</span>
+      <input
+        type="number"
+        step={0.1}
+        min={0}
+        value={Number((valueMs / 1000).toFixed(2))}
+        onChange={(e) => {
+          const seconds = Number(e.target.value);
+          if (Number.isNaN(seconds) || seconds < 0) return;
+          mutate((d) => apply(d, Math.round(seconds * 1000)));
+        }}
+        className="w-20 rounded border border-edge bg-field px-2 py-1 text-right text-xs"
+      />
+    </label>
+  );
+
+  const textInspector = selectedText && (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">Text</p>
+      <input
+        value={selectedText.text}
+        onChange={(e) =>
+          mutate((d) => {
+            const t = d.texts!.find((x) => x.id === soleSelected);
+            if (t) t.text = e.target.value;
+          })
+        }
+        className="w-full rounded border border-edge bg-field px-2 py-1 text-sm text-ink"
+      />
+      <label className="flex items-center justify-between gap-2 text-xs">
+        <span className="text-ink-faint">vertical {(100 * (selectedText.y_pct ?? 0.8)).toFixed(0)}%</span>
+        <input
+          type="range"
+          min={0.05}
+          max={0.95}
+          step={0.01}
+          value={selectedText.y_pct ?? 0.8}
+          onChange={(e) =>
+            mutate((d) => {
+              const t = d.texts!.find((x) => x.id === soleSelected);
+              if (t) t.y_pct = Number(e.target.value);
+            })
+          }
+        />
+      </label>
+      {timeField("start s", selectedText.start_ms, (d, ms) => {
+        const t = d.texts!.find((x) => x.id === soleSelected);
+        if (t && ms < t.end_ms) t.start_ms = ms;
+      })}
+      {timeField("end s", selectedText.end_ms, (d, ms) => {
+        const t = d.texts!.find((x) => x.id === soleSelected);
+        if (t && ms > t.start_ms) t.end_ms = ms;
+      })}
     </div>
+  );
+
+  const audioInspector = selectedAudio && (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">Audio bed</p>
+      <label className="flex items-center gap-2 text-xs">
+        gain {(selectedAudio.gain ?? 1).toFixed(1)}×
+        <input
+          type="range"
+          min={0}
+          max={4}
+          step={0.1}
+          value={selectedAudio.gain ?? 1}
+          onChange={(e) =>
+            mutate((d) => {
+              const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
+              if (c) c.gain = Number(e.target.value);
+            })
+          }
+        />
+      </label>
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={selectedAudio.duck ?? true}
+          onChange={(e) =>
+            mutate((d) => {
+              const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
+              if (c) c.duck = e.target.checked;
+            })
+          }
+        />
+        duck under voice
+      </label>
+      {(["fade_in_ms", "fade_out_ms"] as const).map((field) => (
+        <label key={field} className="flex items-center gap-2 text-xs">
+          {field === "fade_in_ms" ? "fade in" : "fade out"}{" "}
+          {((selectedAudio[field] ?? 0) / 1000).toFixed(1)}s
+          <input
+            type="range"
+            min={0}
+            max={Math.floor(clipLen(selectedAudio) / 2)}
+            step={100}
+            value={selectedAudio[field] ?? 0}
+            onChange={(e) =>
+              mutate((d) => {
+                const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
+                if (c) c[field] = Number(e.target.value);
+              })
+            }
+          />
+        </label>
+      ))}
+      {timeField("start s", selectedAudio.start_ms, (d, ms) => {
+        const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
+        if (c) c.start_ms = ms;
+      })}
+    </div>
+  );
+
+  const findSelectedClip = (d: TimelineDocument) =>
+    d.video_tracks![selectedIsOverlay ? 1 : 0]?.find((x) => x.id === soleSelected);
+
+  const clipInspector = selectedVideoClip && (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+        {selectedIsOverlay ? "Overlay (PiP top-right)" : "Clip"}
+      </p>
+      <p className="truncate text-xs text-ink-muted">
+        {library.find((a) => a.id === selectedVideoClip.asset_id)?.caption ?? "clip"} ·{" "}
+        {(clipLen(selectedVideoClip) / 1000).toFixed(1)}s
+      </p>
+      {timeField("start s", selectedVideoClip.start_ms, (d, ms) => {
+        const c = findSelectedClip(d);
+        if (c) c.start_ms = ms;
+      })}
+      {timeField("in s", inMs(selectedVideoClip), (d, ms) => {
+        const c = findSelectedClip(d);
+        if (c && ms < c.out_ms) c.in_ms = ms;
+      })}
+      {timeField("out s", selectedVideoClip.out_ms, (d, ms) => {
+        const c = findSelectedClip(d);
+        if (c && ms > inMs(c)) c.out_ms = ms;
+      })}
+    </div>
+  );
+
+  // A2: document-level properties when nothing is selected
+  const documentInspector = (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+        Document
+      </p>
+      <p className="text-xs text-ink-muted">
+        {isShort ? "9:16 short" : "16:9 long"} · {(totalMs / 1000).toFixed(1)}s
+      </p>
+      <label className="flex items-center gap-2 text-xs">
+        crossfade {((doc?.transition_ms ?? 0) / 1000).toFixed(1)}s
+        <input
+          type="range"
+          min={0}
+          max={2000}
+          step={100}
+          value={doc?.transition_ms ?? 0}
+          onChange={(e) => mutate((d) => void (d.transition_ms = Number(e.target.value)))}
+        />
+      </label>
+      <p className="text-[10px] text-ink-faint">
+        Applied between every pair of touching clips at export.
+      </p>
+    </div>
+  );
+
+  const propertiesPanel = (
+    <aside className="w-60 shrink-0 space-y-4 rounded-2xl border border-edge bg-surface p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+        Properties
+      </p>
+      {clipInspector ?? audioInspector ?? textInspector ?? (
+        selectedIds.length > 1 ? (
+          <p className="text-xs text-ink-muted">{selectedIds.length} items selected</p>
+        ) : (
+          documentInspector
+        )
+      )}
+    </aside>
+  );
+
+  const assetsPanel = (
+    <aside className="flex w-64 shrink-0 flex-col gap-2 rounded-2xl border border-edge bg-surface p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">Assets</p>
+      <input
+        value={assetSearch}
+        onChange={(e) => setAssetSearch(e.target.value)}
+        placeholder="Search library…"
+        className="rounded-lg border border-edge bg-field px-2 py-1.5 text-xs placeholder-ink-faint"
+      />
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        {timelineAssets.length === 0 && (
+          <p className="text-xs text-ink-faint">Nothing matches.</p>
+        )}
+        {timelineAssets.map((a) => {
+          const isAudio = AUDIO_SUFFIXES.includes(suffixOf(a));
+          return (
+            <div
+              key={a.id}
+              className="group flex w-full items-center gap-2 rounded-lg border border-transparent p-1 hover:border-edge-strong hover:bg-btn"
+            >
+            <button
+              onClick={() => addAsset(a)}
+              title="Add to timeline"
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            >
+              <div className="h-9 w-16 shrink-0 overflow-hidden rounded bg-surface2">
+                {isAudio ? (
+                  <div className="flex h-full items-center justify-center text-accent">♪</div>
+                ) : thumbs[a.id!] ? (
+                  <img src={thumbs[a.id!]} alt="" className="h-full w-full object-cover" loading="lazy" />
+                ) : null}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-xs text-ink-soft">{a.caption ?? "untitled"}</p>
+                <p className="text-[10px] text-ink-faint">
+                  {a.duration_ms ? `${(a.duration_ms / 1000).toFixed(1)}s` : suffixOf(a)}
+                </p>
+              </div>
+            </button>
+            {!isAudio && (
+              <button
+                onClick={() => addClip(a, 1)}
+                title="Add to the overlay lane (picture-in-picture)"
+                className="rounded bg-btn px-1.5 py-0.5 text-[10px] text-ink-muted opacity-0 transition group-hover:opacity-100 hover:text-ink"
+              >
+                PiP
+              </button>
+            )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-ink-faint">Click to append · audio lands on the bed lane</p>
+    </aside>
+  );
+
+  const transportBar = (
+    <div className="flex items-center justify-center gap-2">
+      <button onClick={() => setPlayhead(0)} title="Home" className="rounded-lg bg-btn px-2.5 py-1.5 text-sm">⏮</button>
+      <button onClick={() => setPlayhead((p) => Math.max(0, p - 100))} title="←" className="rounded-lg bg-btn px-2.5 py-1.5 text-sm">◀</button>
+      <button
+        onClick={() => setPlaying((p) => !p)}
+        title="Space"
+        className="rounded-lg bg-lime-300 px-5 py-1.5 text-sm font-semibold text-black hover:bg-lime-200"
+      >
+        {playing ? "⏸" : "▶"}
+      </button>
+      <button onClick={() => setPlayhead((p) => Math.min(totalMs, p + 100))} title="→" className="rounded-lg bg-btn px-2.5 py-1.5 text-sm">▶▏</button>
+      <button onClick={() => setPlayhead(totalMs)} title="End" className="rounded-lg bg-btn px-2.5 py-1.5 text-sm">⏭</button>
+      <span className="ml-2 font-mono text-xs text-ink-muted">
+        {fmtTime(playhead)} / {fmtTime(totalMs)}
+      </span>
+    </div>
+  );
+
+  const editToolbar = (
+    <div className="flex flex-wrap items-center gap-2">
+      {layout === "simple" && (
+        <button
+          onClick={() => setPlaying((p) => !p)}
+          title="Space"
+          className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200"
+        >
+          {playing ? "⏸ Pause" : "▶ Play"}
+        </button>
+      )}
+      <button onClick={undo} title="Ctrl+Z" className="rounded-lg bg-btn px-3 py-2 text-sm">↩</button>
+      <button onClick={redo} title="Ctrl+Shift+Z" className="rounded-lg bg-btn px-3 py-2 text-sm">↪</button>
+      <button onClick={() => splitSelected("both")} title="S — split at playhead"
+        className="rounded-lg bg-btn px-3 py-2 text-sm">Split</button>
+      <button
+        onClick={() => setSnapOn((s) => !s)}
+        title="N — toggle snapping"
+        className={`rounded-lg px-3 py-2 text-sm ${snapOn ? "bg-accent-soft2 text-accent" : "bg-btn text-ink-muted"}`}
+      >
+        Snap
+      </button>
+      <button onClick={addText} className="rounded-lg bg-btn px-3 py-2 text-sm">+ Text</button>
+      {layout === "simple" && (
+        <select
+          value=""
+          onChange={(e) => {
+            const asset = audioAssets.find((a) => a.id === e.target.value);
+            if (asset) addAudio(asset);
+          }}
+          className="rounded-lg border border-edge bg-field px-3 py-2 text-sm"
+        >
+          <option value="">+ Audio…</option>
+          {audioAssets.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.caption ?? a.uri.split("/").pop()}
+            </option>
+          ))}
+        </select>
+      )}
+      <button
+        onClick={(e) => deleteSelected(e.shiftKey)}
+        disabled={selectedIds.length === 0}
+        title="Delete · Shift = ripple (close the gap)"
+        className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300 disabled:opacity-40"
+      >
+        Delete
+      </button>
+      <label className="ml-2 text-xs text-ink-muted">
+        zoom
+        <input type="range" min={0.3} max={3} step={0.1} value={zoom}
+          onChange={(e) => setZoom(Number(e.target.value))} className="ml-1 align-middle" />
+      </label>
+    </div>
+  );
+
+  const seekFromRuler = (e: React.PointerEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPlayhead(Math.min(totalMs, Math.max(0, (e.clientX - rect.left) / pxPerMs)));
+  };
+
+  const timelineStrip = (
+    <div
+      ref={scrollRef}
+      className="overflow-x-auto rounded-2xl border border-edge bg-surface-dim p-3 select-none"
+      onPointerMove={onPointerMove}
+      onPointerUp={() => {
+        dragRef.current = null;
+        setSnapLine(null);
+      }}
+    >
+      <div
+        className="relative mb-1 h-6 cursor-pointer border-b border-edge"
+        style={{ width: totalMs * pxPerMs, minWidth: "100%" }}
+        onPointerDown={(e) => {
+          // drag the ruler to scrub, not just click — OpenCut's ruler
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          rulerScrubRef.current = true;
+          seekFromRuler(e);
+        }}
+        onPointerMove={(e) => rulerScrubRef.current && seekFromRuler(e)}
+        onPointerUp={() => (rulerScrubRef.current = false)}
+      >
+        {Array.from({ length: Math.ceil(totalMs / 1000) + 1 }, (_, s) => (
+          <span key={s} className="absolute top-1 text-[10px] text-ink-faint"
+            style={{ left: s * 1000 * pxPerMs }}>{s}s</span>
+        ))}
+      </div>
+
+      <div
+        className="relative"
+        style={{ width: totalMs * pxPerMs, minWidth: "100%", height: LANE_H * 4 + 28 }}
+        onPointerDown={(e) => {
+          // A5: marquee selection starts on empty lane space only — clips
+          // stopPropagation in grab()
+          const el = e.target as HTMLElement;
+          if (e.target !== e.currentTarget && !el.dataset.lanebg) return;
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          setMarquee({ x0: x, y0: y, x1: x, y1: y });
+        }}
+        onPointerMove={(e) => {
+          if (!marquee) return;
+          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          setMarquee((m) => m && { ...m, x1: x, y1: y });
+        }}
+        onPointerUp={(e) => {
+          if (!marquee) return;
+          const box = {
+            left: Math.min(marquee.x0, marquee.x1),
+            right: Math.max(marquee.x0, marquee.x1),
+            top: Math.min(marquee.y0, marquee.y1),
+            bottom: Math.max(marquee.y0, marquee.y1),
+          };
+          const hit = marqueeHits(
+            box,
+            [
+              { items: track, top: 4, lengthOf: (c) => clipLen(c as never) },
+              { items: overlayTrack, top: LANE_H + 12, lengthOf: (c) => clipLen(c as never) },
+              { items: audio, top: (LANE_H + 8) * 2 + 4, lengthOf: (c) => clipLen(c as never) },
+              {
+                items: texts,
+                top: (LANE_H + 8) * 3 + 4,
+                lengthOf: (t) => (t as unknown as TextClip).end_ms - (t as unknown as TextClip).start_ms,
+              },
+            ],
+            pxPerMs,
+            LANE_H - 8,
+          );
+          setSelectedIds((ids) =>
+            e.shiftKey ? [...new Set([...ids, ...hit])] : hit,
+          );
+          setMarquee(null);
+        }}
+      >
+        {lanes.map((lane, i) => (
+          <div key={i} data-lanebg="1" className="absolute inset-x-0 rounded bg-surface2"
+            style={{ top: lane.top, height: LANE_H }} />
+        ))}
+        {(doc?.transition_ms ?? 0) > 0 &&
+          [...track]
+            .sort((a, b) => a.start_ms - b.start_ms)
+            .map((c, i, arr) => {
+              const next = arr[i + 1];
+              if (!next || Math.abs(c.start_ms + clipLen(c) - next.start_ms) > 1) return null;
+              return (
+                <div
+                  key={`tb-${c.id}`}
+                  title={`crossfade ${((doc?.transition_ms ?? 0) / 1000).toFixed(1)}s`}
+                  className="pointer-events-none absolute z-10 h-2 w-2 rotate-45 bg-lime-300"
+                  style={{ left: next.start_ms * pxPerMs - 4, top: LANE_H / 2 - 4 }}
+                />
+              );
+            })}
+        {track.map((c) => (
+          <div key={c.id}
+            onPointerDown={(e) => grab(e, { kind: "move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+            onPointerMove={(e) => {
+              if (dragRef.current) return;
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+              setHover({
+                clipId: c.id,
+                x: e.clientX,
+                y: rect.top,
+                srcMs: inMs(c) + frac * clipLen(c),
+              });
+            }}
+            onPointerLeave={() => setHover((h) => (h?.clipId === c.id ? null : h))}
+            className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
+              selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn"
+            }`}
+            style={{
+              left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: 4, height: LANE_H - 8,
+              ...(extras[c.asset_id]?.sprite
+                ? {
+                    backgroundImage: `url(${extras[c.asset_id].sprite})`,
+                    backgroundSize: "auto 100%",
+                    backgroundRepeat: "repeat-x",
+                  }
+                : {}),
+            }}
+          >
+            <span className="truncate rounded bg-black/45 px-1 text-white/90">
+              {(clipLen(c) / 1000).toFixed(1)}s
+            </span>
+            <div onPointerDown={(e) => grab(e, { kind: "trim-l", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+            <div onPointerDown={(e) => grab(e, { kind: "trim-r", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+          </div>
+        ))}
+        {overlayTrack.map((c) => (
+          <div key={c.id}
+            onPointerDown={(e) => grab(e, { kind: "ov-move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+            onPointerMove={(e) => {
+              if (dragRef.current) return;
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+              setHover({
+                clipId: c.id, x: e.clientX, y: rect.top,
+                srcMs: inMs(c) + frac * clipLen(c),
+              });
+            }}
+            onPointerLeave={() => setHover((h) => (h?.clipId === c.id ? null : h))}
+            className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
+              selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn"
+            }`}
+            style={{
+              left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs,
+              top: LANE_H + 12, height: LANE_H - 8,
+              ...(extras[c.asset_id]?.sprite
+                ? {
+                    backgroundImage: `url(${extras[c.asset_id].sprite})`,
+                    backgroundSize: "auto 100%",
+                    backgroundRepeat: "repeat-x",
+                  }
+                : {}),
+            }}
+          >
+            <span className="truncate rounded bg-black/45 px-1 text-white/90">
+              PiP {(clipLen(c) / 1000).toFixed(1)}s
+            </span>
+            <div onPointerDown={(e) => grab(e, { kind: "ov-l", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+            <div onPointerDown={(e) => grab(e, { kind: "ov-r", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+          </div>
+        ))}
+        {audio.map((c) => (
+          <div key={c.id}
+            onPointerDown={(e) => grab(e, { kind: "audio-move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+            className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
+              selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
+            }`}
+            style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: (LANE_H + 8) * 2 + 4, height: LANE_H - 8 }}
+          >
+            {(c.fade_in_ms ?? 0) > 0 && (
+              <div className="pointer-events-none absolute inset-y-0 left-0 z-10"
+                style={{ width: (c.fade_in_ms ?? 0) * pxPerMs,
+                         background: "linear-gradient(to right, rgba(0,0,0,0.65), transparent)" }} />
+            )}
+            {(c.fade_out_ms ?? 0) > 0 && (
+              <div className="pointer-events-none absolute inset-y-0 right-0 z-10"
+                style={{ width: (c.fade_out_ms ?? 0) * pxPerMs,
+                         background: "linear-gradient(to left, rgba(0,0,0,0.65), transparent)" }} />
+            )}
+            {extras[c.asset_id]?.peaks?.length ? (
+              <div className="pointer-events-none absolute inset-x-1 inset-y-2 text-accent opacity-70">
+                <Bars values={extras[c.asset_id].peaks!} mirror height={LANE_H - 24} />
+              </div>
+            ) : null}
+            <span className="relative truncate text-ink-soft">
+              ♪ {(clipLen(c) / 1000).toFixed(1)}s · {(c.gain ?? 1).toFixed(1)}×
+              {(c.duck ?? true) ? " · duck" : ""}
+            </span>
+            <div onPointerDown={(e) => grab(e, { kind: "audio-l", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+            <div onPointerDown={(e) => grab(e, { kind: "audio-r", clipId: c.id, startX: e.clientX, orig: { ...c } })}
+              className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+          </div>
+        ))}
+        {texts.map((t) => (
+          <div key={t.id}
+            onPointerDown={(e) => grab(e, { kind: "text-move", clipId: t.id, startX: e.clientX, orig: { ...t } })}
+            className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
+              selectedIds.includes(t.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
+            }`}
+            style={{ left: t.start_ms * pxPerMs, width: (t.end_ms - t.start_ms) * pxPerMs, top: (LANE_H + 8) * 3 + 4, height: LANE_H - 8 }}
+          >
+            <span className="truncate text-ink-soft">T: {t.text}</span>
+            <div onPointerDown={(e) => grab(e, { kind: "text-l", clipId: t.id, startX: e.clientX, orig: { ...t } })}
+              className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+            <div onPointerDown={(e) => grab(e, { kind: "text-r", clipId: t.id, startX: e.clientX, orig: { ...t } })}
+              className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-edge-strong" />
+          </div>
+        ))}
+        {marquee && (
+          <div
+            className="pointer-events-none absolute z-20 border border-lime-400/80 bg-lime-400/10"
+            style={{
+              left: Math.min(marquee.x0, marquee.x1),
+              top: Math.min(marquee.y0, marquee.y1),
+              width: Math.abs(marquee.x1 - marquee.x0),
+              height: Math.abs(marquee.y1 - marquee.y0),
+            }}
+          />
+        )}
+        {snapLine !== null && dragRef.current && (
+          <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-lime-400/70"
+            style={{ left: snapLine * pxPerMs }} />
+        )}
+        <div className="pointer-events-none absolute inset-y-0 w-px bg-emerald-400"
+          style={{ left: playhead * pxPerMs }} />
+      </div>
+    </div>
+  );
+
+  const hintStrip = (
+    <p className="text-[11px] text-ink-faint">
+      space/K play · J/L ±1s · ←/→ frame (shift 1s) · drag ruler to scrub ·
+      ctrl+scroll zoom · S split · Q/W trim to playhead · del delete (shift = ripple) ·
+      ctrl+C/V copy/paste at playhead · ctrl+A all · ctrl+D duplicate · ctrl+Z/Y undo/redo ·
+      N snap · shift-click / drag-marquee multi-select · esc deselect · PiP = overlay lane
+    </p>
+  );
+
+  const hoverThumb = hover && hoverClip && hoverCue && hoverExtras?.sprite && (
+    <div
+      className="pointer-events-none fixed z-50 -translate-x-1/2 overflow-hidden rounded-lg border border-edge-strong shadow-lg"
+      style={{
+        left: hover.x,
+        top: hover.y - hoverCue.h - 12,
+        width: hoverCue.w,
+        height: hoverCue.h,
+        backgroundImage: `url(${hoverExtras.sprite})`,
+        backgroundPosition: `-${hoverCue.x}px -${hoverCue.y}px`,
+      }}
+    >
+      <span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] text-white">
+        {(hover.srcMs / 1000).toFixed(1)}s
+      </span>
+    </div>
+  );
+
+  const previewCanvas = (
+    <canvas
+      ref={canvasRef}
+      width={canvasW}
+      height={canvasH}
+      className="h-auto max-w-full rounded-lg border border-edge bg-field"
+    />
+  );
+
+  const infoLine = current && (
+    <p className="text-xs text-ink-muted">
+      {(totalMs / 1000).toFixed(1)}s · {track.length} clips · {audio.length} audio ·{" "}
+      {texts.length} texts · v{current.version}
+    </p>
   );
 
   return (
@@ -359,7 +1469,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         <select
           value={current?.id ?? ""}
           onChange={(e) => e.target.value && load(e.target.value)}
-          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm"
+          className="rounded-lg border border-edge bg-field px-3 py-2 text-sm"
         >
           <option value="">Open timeline…</option>
           {timelines.map((t) => (
@@ -368,160 +1478,75 @@ export default function EditorView({ openId }: { openId?: string | null }) {
             </option>
           ))}
         </select>
+        <div className="flex overflow-hidden rounded-lg border border-edge">
+          {(["studio", "simple"] as EditorLayout[]).map((l) => (
+            <button
+              key={l}
+              onClick={() => setLayout(l)}
+              className={`px-3 py-2 text-xs capitalize ${
+                layout === l ? "bg-lime-300 font-semibold text-black" : "bg-btn text-ink-muted"
+              }`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
         {current && (
           <>
-            <button onClick={() => setPlaying((p) => !p)}
-              className="rounded-lg bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700">
-              {playing ? "⏸" : "▶"}
-            </button>
             <button onClick={save} disabled={!dirty}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium enabled:hover:bg-emerald-500 disabled:opacity-40">
+              className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black enabled:hover:bg-lime-200 disabled:opacity-40">
               Save{dirty ? " *" : ""}
             </button>
             <button onClick={exportTimeline}
-              className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-white">
+              className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200">
               Export
             </button>
-            {exportUrl && (
-              <a href={exportUrl} target="_blank" rel="noreferrer"
-                className="rounded-lg bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 hover:bg-white">
-                ⬇ Download
-              </a>
-            )}
-            <button onClick={splitSelected} disabled={!selected}
-              className="rounded-lg bg-zinc-800 px-3 py-2 text-sm disabled:opacity-40">Split</button>
-            <button onClick={addText} className="rounded-lg bg-zinc-800 px-3 py-2 text-sm">+ Text</button>
-            <button onClick={deleteSelected} disabled={!selected}
-              className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300 disabled:opacity-40">Delete</button>
-            <label className="text-xs text-zinc-500">
-              cross-fade
-              <input
-                type="number" min={0} max={2000} step={100}
-                value={doc?.transition_ms ?? 0}
-                onChange={(e) => mutate((d) => { d.transition_ms = Number(e.target.value); })}
-                className="ml-1 w-20 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 align-middle"
-                title="Cross-fade between clips (ms); 0 = hard cuts"
-              />
-            </label>
-            <label className="text-xs text-zinc-500">
-              zoom
-              <input type="range" min={0.3} max={3} step={0.1} value={zoom}
-                onChange={(e) => setZoom(Number(e.target.value))} className="ml-1 align-middle" />
-            </label>
           </>
         )}
-        {status && <span className="text-xs text-zinc-400">{status}</span>}
+        {status && <span className="text-xs text-ink-muted">{status}</span>}
       </div>
 
-      {current && doc && (
+      {current && doc && layout === "studio" && (
         <>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <select value={addPick} onChange={(e) => setAddPick(e.target.value)}
-              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-xs">
-              <option value="">Add clip from library…</option>
-              {library.filter(isVideo).map((a) => (
-                <option key={a.id} value={a.id}>{a.caption ?? a.uri}</option>
-              ))}
-            </select>
-            <button onClick={addClip} disabled={!addPick}
-              className="rounded bg-zinc-800 px-3 py-1.5 text-xs disabled:opacity-40">+ Clip</button>
-            <select value={musicPick} onChange={(e) => setMusicPick(e.target.value)}
-              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-xs">
-              <option value="">Add music at playhead…</option>
-              {library.filter(isAudio).map((a) => (
-                <option key={a.id} value={a.id}>{a.caption ?? a.uri}</option>
-              ))}
-            </select>
-            <button onClick={addMusic} disabled={!musicPick}
-              className="rounded bg-zinc-800 px-3 py-1.5 text-xs disabled:opacity-40">+ Music</button>
-            <span className="text-xs text-zinc-600">
-              music ducks under clip audio automatically
-            </span>
-          </div>
-
-          <div className="flex gap-4">
-            <canvas ref={canvasRef} width={320} height={180}
-              className="rounded-lg border border-zinc-800 bg-zinc-950" />
-            <div className="flex-1 text-xs text-zinc-500">
-              <p className="mb-1 text-sm text-zinc-300">{current.title}</p>
-              <p>
-                {(totalMs / 1000).toFixed(1)}s · {track.length} clips · {audio.length} music ·{" "}
-                {texts.length} texts · v{current.version}
-              </p>
-              <p className="mt-2">Playhead {(playhead / 1000).toFixed(2)}s</p>
-              {selectedText && (
-                <input
-                  value={selectedText.text}
-                  onChange={(e) =>
-                    mutate((d) => {
-                      const t = d.texts!.find((x) => x.id === selected);
-                      if (t) t.text = e.target.value;
-                    })
-                  }
-                  className="mt-2 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200"
-                />
-              )}
+          <div className="flex items-stretch gap-3">
+            {assetsPanel}
+            <div className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-edge bg-surface-dim p-4">
+              {previewCanvas}
+              {transportBar}
+              {infoLine}
             </div>
+            {propertiesPanel}
           </div>
-
-          <div
-            className="select-none overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950 p-3"
-            onPointerMove={onPointerMove}
-            onPointerUp={() => (dragRef.current = null)}
-          >
-            <div
-              className="relative mb-1 h-6 cursor-pointer border-b border-zinc-800"
-              style={{ width: totalMs * pxPerMs }}
-              onPointerDown={(e) => {
-                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                setPlayhead(Math.max(0, (e.clientX - rect.left) / pxPerMs));
-              }}
-            >
-              {Array.from({ length: Math.ceil(totalMs / 1000) + 1 }, (_, s) => (
-                <span key={s} className="absolute top-1 text-[10px] text-zinc-600"
-                  style={{ left: s * 1000 * pxPerMs }}>{s}s</span>
-              ))}
-            </div>
-
-            <div
-              className="relative"
-              style={{ width: totalMs * pxPerMs, height: lanes * LANE_H + (lanes - 1) * LANE_GAP }}
-            >
-              {[0, 1, 2].map((lane) => (
-                <div key={lane} className="absolute inset-x-0 rounded bg-zinc-900"
-                  style={{ top: lane * (LANE_H + LANE_GAP), height: LANE_H }} />
-              ))}
-              <span className="absolute left-1 top-1 text-[9px] uppercase text-zinc-600">video</span>
-              <span className="absolute left-1 text-[9px] uppercase text-zinc-600"
-                style={{ top: LANE_H + LANE_GAP + 4 }}>music</span>
-              <span className="absolute left-1 text-[9px] uppercase text-zinc-600"
-                style={{ top: 2 * (LANE_H + LANE_GAP) + 4 }}>text</span>
-
-              {track.map((c) =>
-                clipBox(c, clipLen(c) * pxPerMs, 4, `${(clipLen(c) / 1000).toFixed(1)}s`,
-                  ["move", "trim-l", "trim-r"]),
-              )}
-              {audio.map((c) =>
-                clipBox(c, clipLen(c) * pxPerMs, LANE_H + LANE_GAP + 4,
-                  `♪ ${(clipLen(c) / 1000).toFixed(1)}s`,
-                  ["audio-move", "audio-l", "audio-r"], "bg-indigo-950/60"),
-              )}
-              {texts.map((t) =>
-                clipBox(t, (t.end_ms - t.start_ms) * pxPerMs, 2 * (LANE_H + LANE_GAP) + 4,
-                  `T: ${t.text}`, ["text-move", "text-l", "text-r"], "bg-zinc-800/80"),
-              )}
-              <div className="pointer-events-none absolute inset-y-0 w-px bg-emerald-400"
-                style={{ left: playhead * pxPerMs }} />
-            </div>
-          </div>
+          {editToolbar}
+          {timelineStrip}
+          {hintStrip}
+          {hoverThumb}
         </>
       )}
+
+      {current && doc && layout === "simple" && (
+        <>
+          <div className="flex gap-4">
+            {previewCanvas}
+            <div className="flex-1 space-y-2 text-xs text-ink-muted">
+              <p className="mb-1 text-sm text-ink-soft">{current.title}</p>
+              {infoLine}
+              <p>Playhead {(playhead / 1000).toFixed(2)}s{playing ? " · playing" : ""}</p>
+              {textInspector}
+              {audioInspector}
+            </div>
+          </div>
+          {editToolbar}
+          {timelineStrip}
+          {hintStrip}
+          {hoverThumb}
+        </>
+      )}
+
       {!current && (
-        <div className="rounded-xl border border-dashed border-zinc-700 p-10 text-center text-sm text-zinc-500">
-          Open a timeline above, or send a storyboard here with its "Edit" button.
-          Trim and rearrange clips, drop in music (it ducks under clip audio),
-          add titles, then Export — the download appears when the render is done.
-        </div>
+        <p className="text-sm text-ink-faint">
+          Open a timeline, or send a storyboard here with its "Edit" button.
+        </p>
       )}
     </div>
   );

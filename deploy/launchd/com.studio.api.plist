@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mac dev-mode API (docs/mac-dev.md). Install:
+     cp deploy/launchd/com.studio.api.plist ~/Library/LaunchAgents/
+     launchctl load ~/Library/LaunchAgents/com.studio.api.plist
+     Adjust WorkingDirectory + venv path; DEV_ENGINES=1 is the Mac default. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.studio.api</string>
+  <key>WorkingDirectory</key><string>/Users/you/video-studio</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/video-studio/.venv/bin/python</string>
+    <string>-m</string><string>uvicorn</string>
+    <string>api.main:app</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>8000</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DEV_ENGINES</key><string>1</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key><string>/tmp/studio-api.log</string>
+  <key>StandardErrorPath</key><string>/tmp/studio-api.log</string>
+</dict>
+</plist>

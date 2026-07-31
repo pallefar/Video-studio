@@ -16,16 +16,28 @@ def _store(client):
     return store
 
 
-def test_thumbs_batch_endpoint(client):
+def test_thumbs_batch_endpoint(client, session):
+    """One call, every thumbnail — anchored on real Asset rows (the M17+
+    implementation): ingested assets use their derived sprite, image assets
+    fall back to the image itself, un-ingested video gets nothing."""
+    from schema.models import Asset, AssetOrigin
+
     with mock_aws():
         store = _store(client)
-        store.put_bytes("assets/derived/aaa/sprite.jpg", b"jpg")
-        store.put_bytes("assets/derived/bbb/sprite.jpg", b"jpg")
-        store.put_bytes("assets/derived/ccc/proxy.mp4", b"mp4")  # no sprite yet
+        ingested = Asset(origin=AssetOrigin.own, uri="s3://avatar-pipeline/clips/a.mp4",
+                         caption="a", has_identifiable_people=False)
+        image = Asset(origin=AssetOrigin.generated, uri="s3://avatar-pipeline/stills/b.png",
+                      caption="b", has_identifiable_people=False)
+        raw = Asset(origin=AssetOrigin.own, uri="s3://avatar-pipeline/clips/c.mp4",
+                    caption="c", has_identifiable_people=False)
+        session.add_all([ingested, image, raw])
+        session.commit()
+        store.put_bytes(f"assets/derived/{ingested.id}/sprite.jpg", b"jpg")
+        store.put_bytes("stills/b.png", b"png")
 
         thumbs = client.get("/assets/thumbs").json()
-        assert set(thumbs) == {"aaa", "bbb"}
-        assert "sprite.jpg" in thumbs["aaa"]
+        assert set(thumbs) == {str(ingested.id), str(image.id)}  # raw video: none yet
+        assert "sprite.jpg" in thumbs[str(ingested.id)]
 
 
 def test_storyboard_export_status_closes_the_loop(client):

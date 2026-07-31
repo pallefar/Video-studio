@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mac dev-mode wan-lane worker: generation jobs render as DEV_ENGINES
+     placeholders (no CUDA on Apple Silicon). Same install steps as
+     com.studio.api.plist. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.studio.worker-wan</string>
+  <key>WorkingDirectory</key><string>/Users/you/video-studio</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/video-studio/.venv/bin/python</string>
+    <string>worker_gpu/run_wan.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DEV_ENGINES</key><string>1</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key><string>/tmp/studio-worker-wan.log</string>
+  <key>StandardErrorPath</key><string>/tmp/studio-worker-wan.log</string>
+</dict>
+</plist>

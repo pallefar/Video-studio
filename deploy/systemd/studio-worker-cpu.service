@@ -1,0 +1,19 @@
+# CPU lane: ffmpeg assembly/export, ingest derivatives, captioning, publish,
+# API-provider network jobs. Parallelisable — `systemctl enable` more than one
+# instance via a template if the queue ever backs up.
+[Unit]
+Description=AI video studio CPU worker (cpu queue)
+After=network-online.target studio-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=studio
+WorkingDirectory=/opt/video-studio
+EnvironmentFile=/opt/video-studio/.env
+ExecStart=/opt/video-studio/.venv/bin/python worker_cpu/run.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

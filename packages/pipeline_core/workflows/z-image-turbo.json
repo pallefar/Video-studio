@@ -1,0 +1,127 @@
+{
+  "output": {
+    "node": "60",
+    "kind": "image"
+  },
+  "defaults": {
+    "width": 1024,
+    "height": 1024,
+    "negative": "blurry, low quality, watermark text"
+  },
+  "inputs": {
+    "prompt": [
+      "6",
+      "inputs",
+      "text"
+    ],
+    "negative": [
+      "7",
+      "inputs",
+      "text"
+    ],
+    "seed": [
+      "3",
+      "inputs",
+      "seed"
+    ],
+    "width": [
+      "40",
+      "inputs",
+      "width"
+    ],
+    "height": [
+      "40",
+      "inputs",
+      "height"
+    ]
+  },
+  "required": [
+    "prompt"
+  ],
+  "graph": {
+    "2": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "z-image-turbo.safetensors"
+      }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "",
+        "clip": [
+          "2",
+          1
+        ]
+      }
+    },
+    "7": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "static, blurry, low quality",
+        "clip": [
+          "2",
+          1
+        ]
+      }
+    },
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": 0,
+        "steps": 8,
+        "cfg": 2.5,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1.0,
+        "model": [
+          "2",
+          0
+        ],
+        "positive": [
+          "6",
+          0
+        ],
+        "negative": [
+          "7",
+          0
+        ],
+        "latent_image": [
+          "40",
+          0
+        ]
+      }
+    },
+    "40": {
+      "class_type": "EmptyLatentImage",
+      "inputs": {
+        "width": 1024,
+        "height": 1024,
+        "batch_size": 1
+      }
+    },
+    "8": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": [
+          "3",
+          0
+        ],
+        "vae": [
+          "2",
+          2
+        ]
+      }
+    },
+    "60": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "images": [
+          "8",
+          0
+        ],
+        "filename_prefix": "studio"
+      }
+    }
+  }
+}

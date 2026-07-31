@@ -54,6 +54,20 @@ def make_proxy(ffmpeg_bin: str, src: Path, dst: Path, has_audio: bool) -> Path:
     return dst
 
 
+def make_poster(ffmpeg_bin: str, src: Path, dst: Path, duration_ms: int) -> Path:
+    """Single poster frame (~25% in) — the library/dashboard thumbnail.
+    The sprite sheet is a tiled mosaic and reads as a grid when used as a
+    thumb; this is the one-frame answer."""
+    at_s = max(0.0, (duration_ms / 1000) * 0.25)
+    subprocess.run(
+        [ffmpeg_bin, "-y", "-hide_banner", "-nostdin", "-ss", f"{at_s:.3f}",
+         "-i", str(src), "-frames:v", "1", "-vf", "scale=480:-2",
+         "-q:v", "4", str(dst)],
+        check=True, capture_output=True,
+    )
+    return dst
+
+
 def sprite_plan(duration_ms: int, width: int, height: int) -> dict:
     interval_s = max(1, math.ceil(duration_ms / 1000 / MAX_THUMBS))
     count = max(1, math.ceil(duration_ms / 1000 / interval_s))

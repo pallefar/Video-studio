@@ -74,3 +74,18 @@ def test_resolve_endpoint_never_returns_flagged(client, session):
         "/assets/resolve", params={"query": "presenter talking to camera", "threshold": 0.1}
     )
     assert response.status_code == 404
+
+
+def test_post_created_asset_is_resolvable(client):
+    """POST /assets must embed at creation — an asset without an embedding is
+    invisible to the resolver's cosine search (fixed blind spot)."""
+    created = client.post(
+        "/assets",
+        json={"origin": "own", "uri": "s3://b/drone-city.mp4",
+              "caption": "aerial drone shot of a city at night",
+              "has_identifiable_people": False, "approved": True},
+    )
+    assert created.status_code == 201, created.text
+    resolved = client.get("/assets/resolve", params={"query": "aerial drone shot of a city at night"})
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["id"] == created.json()["id"]

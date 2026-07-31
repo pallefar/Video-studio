@@ -85,6 +85,73 @@ def test_silent_bed_when_no_audio_sources():
     assert audio_map == "[aout]"
 
 
+# --- A1: audio fades --------------------------------------------------------
+
+
+def test_music_fades_compile_before_gain():
+    timeline = _timeline(["own"])
+    timeline["music"] = [{
+        "id": "m", "asset_uri": "s3://b/bed.wav", "start_ms": 500, "in_ms": 0,
+        "out_ms": 4000, "gain": 0.8, "duck": True,
+        "fade_in_ms": 1000, "fade_out_ms": 500,
+    }]
+    args = build_ffmpeg_args(timeline, ["a.mp4"], "o.mp4", None, music_paths=["bed.wav"])
+    graph = _graph(args)
+    assert "afade=t=in:st=0:d=1.000" in graph
+    assert "afade=t=out:st=3.500:d=0.500" in graph  # 4.0s clip - 0.5s fade
+    # fades run inside the per-clip chain, before volume/adelay
+    chain = next(f for f in graph.split(";") if "afade" in f)
+    assert chain.index("afade") < chain.index("volume=0.800") < chain.index("adelay=500")
+
+
+def test_music_without_fades_has_no_afade():
+    timeline = _timeline(["own"])
+    timeline["music"] = [{
+        "id": "m", "asset_uri": "s3://b/bed.wav", "start_ms": 0, "in_ms": 0,
+        "out_ms": 4000, "gain": 1.0, "duck": True,
+    }]
+    args = build_ffmpeg_args(timeline, ["a.mp4"], "o.mp4", None, music_paths=["bed.wav"])
+    assert "afade" not in _graph(args)
+
+
+# --- A3: overlay video track (PiP) ------------------------------------------
+
+
+def _overlay(start_ms=1000, in_ms=0, out_ms=2000, origin="own"):
+    return {"id": "ov", "asset_id": "x", "asset_uri": "s3://b/ov.mp4",
+            "start_ms": start_ms, "in_ms": in_ms, "out_ms": out_ms, "origin": origin}
+
+
+def test_overlay_track_compiles_as_pip():
+    timeline = _timeline(["own", "own"])
+    timeline["overlays"] = [_overlay()]
+    args = build_ffmpeg_args(timeline, ["a", "b"], "o.mp4", None, overlay_paths=["ov.mp4"])
+    graph = _graph(args)
+    assert "scale=640:-2" in graph  # 1/3 of 1920
+    assert "setpts=PTS-STARTPTS+1.000/TB[pip0]" in graph
+    assert "overlay=W-w-24:24:eof_action=pass:enable='between(t,1.000,3.000)'[ov0]" in graph
+    assert "ov.mp4" in args
+
+
+def test_generated_overlay_forces_c1_watermark():
+    timeline = _timeline(["own", "own"])  # clean base shots
+    timeline["overlays"] = [_overlay(origin="generated")]
+    assert watermark_required(timeline)
+    with pytest.raises(ValueError, match="C1"):
+        build_ffmpeg_args(timeline, ["a", "b"], "o.mp4", None, overlay_paths=["ov.mp4"])
+    # and with the overlay supplied, the watermark is applied AFTER the PiP
+    args = build_ffmpeg_args(timeline, ["a", "b"], "o.mp4", "wm.png", overlay_paths=["ov.mp4"])
+    graph = _graph(args)
+    assert graph.index("[ov0]") < graph.index("overlay=W-w-24:H-h-24")
+
+
+def test_overlay_paths_must_match():
+    timeline = _timeline(["own"])
+    timeline["overlays"] = [_overlay()]
+    with pytest.raises(ValueError, match="overlay"):
+        build_ffmpeg_args(timeline, ["a"], "o.mp4", None)
+
+
 # --- C1: the watermark decision has no off-switch --------------------------
 
 
@@ -182,6 +249,34 @@ def test_real_render_and_c1_frame_sampling(ffmpeg_bin, clips, tmp_path):
             1 for a, b in zip(frame_marked.getdata(), frame_clean.getdata()) if abs(a - b) > 30
         )
         assert changed / pixels > 0.005, f"watermark not detectable at {fraction:.0%} of duration"
+
+
+def test_real_render_overlay_pip_visible(ffmpeg_bin, clips, tmp_path):
+    """A3 end-to-end: the overlay clip actually shows up top-right."""
+    durations = [1000, 1000]
+    base = _timeline(["own", "own"], width=192, height=108, durations=durations)
+    with_overlay = _timeline(["own", "own"], width=192, height=108, durations=durations)
+    with_overlay["overlays"] = [_overlay(start_ms=200, in_ms=0, out_ms=1200)]
+
+    clean = _render(ffmpeg_bin, base, clips, tmp_path, "no-ov")
+    red, blue = clips  # overlay the blue clip over the red-then-blue base
+    output = tmp_path / "with-ov.mp4"
+    args = build_ffmpeg_args(
+        with_overlay, [str(red), str(red)], str(output), None,
+        overlay_paths=[str(blue)], ffmpeg_bin=ffmpeg_bin,
+    )
+    subprocess.run(args, check=True, capture_output=True)
+
+    frame_ov = _frame(ffmpeg_bin, output, 0.7, tmp_path / "ov.png")
+    frame_clean = _frame(ffmpeg_bin, clean, 0.7, tmp_path / "cl.png")
+    width = frame_ov.size[0]
+    # top-right region where the PiP sits (x from W-24-w, y from 24)
+    box = (width - 24 - width // 3, 24, width - 24, 24 + 12)
+    region_ov = list(frame_ov.crop(box).getdata())
+    region_clean = list(frame_clean.crop(box).getdata())
+    mean_ov = sum(region_ov) / len(region_ov)
+    mean_clean = sum(region_clean) / len(region_clean)
+    assert abs(mean_ov - mean_clean) > 15, "PiP overlay not visible top-right"
 
 
 def test_export_stage_renders_and_files_asset(ffmpeg_bin, clips, engine, monkeypatch):

@@ -188,6 +188,16 @@ Qwen3.5 (Apache 2.0), Florence-2 (MIT), OpenTimelineIO (Apache 2.0), mediabunny
 caveat — FILM is the clean fallback); Stable Audio Open (<$1M revenue cap); Civitai
 camera LoRAs (audit each LoRA's licence individually before commercial use).
 
+**Sidecar exception (recorded 2026-07-31):** ComfyUI (GPL-3.0) and its custom-node
+packs (mixed: Apache-2.0, MIT, GPL-3.0 — per-pack in `pipeline_core/comfy_nodes.py`)
+run as a separate service reached over HTTP, never linked into the studio process —
+the same subprocess-isolation reasoning as audiowaveform (§4). The MIT/Apache rule
+governs model weights and studio dependencies; the sidecar's plugin ecosystem is
+outside that boundary. **ElevenLabs** (API provider, §3): generated audio is
+commercially usable under a paid plan's ToS — recorded on every generated asset's
+licence field; configuring `ELEVENLABS_API_KEY` is the per-provider data-egress
+decision.
+
 **Rejected — do not introduce (adds to v1's list):** FLUX.1 [dev] and all
 [dev]-licensed FLUX variants, FLUX.2 Klein 9B (non-commercial); MusicGen/AudioCraft
 (CC-BY-NC); HunyuanVideo 1.x (licence void in EU — fatal for an EU operator);

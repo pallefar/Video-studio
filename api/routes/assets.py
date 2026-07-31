@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict
 
@@ -60,6 +61,10 @@ def _get_or_404(session: Session, asset_id: uuid.UUID) -> Asset:
 @router.post("", response_model=AssetRead, status_code=201)
 async def create_asset(body: AssetCreate, session: Session = Depends(get_session)):
     asset = Asset.model_validate(body)
+    # embed at creation like every other ingest path — an asset without an
+    # embedding is invisible to the resolver's cosine search
+    if body.caption:
+        asset.embedding = get_embedder_dep().embed(body.caption)
     session.add(asset)
     session.commit()
     session.refresh(asset)
@@ -71,16 +76,11 @@ async def list_assets(session: Session = Depends(get_session)):
     return session.exec(select(Asset).order_by(Asset.created_at)).all()
 
 
-@router.get("/thumbs")
-async def asset_thumbnails(store: ObjectStore = Depends(get_object_store)):
-    """One call, every available thumbnail: {asset_id: presigned sprite url}.
-    Sprites exist once an asset has been ingested (M14)."""
-    urls: dict[str, str] = {}
-    for key in store.list_keys("assets/derived/"):
-        if key.endswith("/sprite.jpg"):
-            asset_id = key.split("/")[2]
-            urls[asset_id] = store.presign_get(key)
-    return urls
+# Media suffixes /upload accepts; anything else stores as .bin (still
+# usable, just never interpreted). The uuid key means the client filename
+# never reaches the object store — only this sanitised suffix does.
+_UPLOAD_SUFFIX_RE = re.compile(r"^[a-z0-9]{1,5}$")
+MAX_UPLOAD_MB = 2048
 
 
 @router.post("/upload", response_model=AssetRead, status_code=201)
@@ -95,10 +95,20 @@ async def upload_asset(
     import mimetypes
     from pathlib import PurePosixPath
 
-    suffix = PurePosixPath(file.filename or "upload.bin").suffix or ".bin"
-    key = f"assets/uploads/{uuid.uuid4()}{suffix}"
+    raw_suffix = PurePosixPath(file.filename or "upload.bin").suffix.lstrip(".").lower()
+    suffix = raw_suffix if _UPLOAD_SUFFIX_RE.match(raw_suffix) else "bin"
+    key = f"assets/uploads/{uuid.uuid4()}.{suffix}"
     content_type = file.content_type or mimetypes.guess_type(key)[0]
-    data = await file.read()
+
+    limit = MAX_UPLOAD_MB * 1024 * 1024
+    chunks: list[bytes] = []
+    received = 0
+    while chunk := await file.read(8 * 1024 * 1024):
+        received += len(chunk)
+        if received > limit:
+            raise HTTPException(status_code=413, detail=f"upload exceeds {MAX_UPLOAD_MB} MB")
+        chunks.append(chunk)
+    data = b"".join(chunks)
     uri = store.put_bytes(key, data, content_type=content_type)
 
     text = caption or (file.filename or "upload")
@@ -129,6 +139,50 @@ async def resolve(
     if asset is None:
         raise HTTPException(status_code=404, detail="no approved asset above threshold")
     return asset
+
+
+_IMAGE_SUFFIXES = ("png", "jpg", "jpeg", "webp")
+
+
+@router.get("/thumbs")
+async def asset_thumbs(
+    session: Session = Depends(get_session),
+    store: ObjectStore = Depends(get_object_store),
+):
+    """asset_id -> presigned thumbnail URL. Preference order: the M14 poster
+    frame, then the scrub sprite (older ingests), then the asset itself when
+    it is an image. Video assets without derivatives simply have no thumb —
+    the panel shows a placeholder. One store listing plus a column-only
+    select — never full Asset hydration (rows carry embedding vectors)."""
+    posters: dict[str, str] = {}
+    sprites: dict[str, str] = {}
+    for key in store.list_keys("assets/derived/"):
+        parts = key.split("/")
+        if len(parts) != 4:
+            continue
+        if parts[3] == "poster.jpg":
+            posters[parts[2]] = key
+        elif parts[3] == "sprite.jpg":
+            sprites[parts[2]] = key
+
+    thumbs: dict[str, str] = {}
+    for asset_id, uri in session.exec(select(Asset.id, Asset.uri)).all():
+        key_id = str(asset_id)
+        if key_id in posters:
+            thumbs[key_id] = store.presign_get(posters[key_id])
+        elif key_id in sprites:
+            thumbs[key_id] = store.presign_get(sprites[key_id])
+        elif uri.rsplit(".", 1)[-1].lower() in _IMAGE_SUFFIXES:
+            try:
+                bucket, key = store.parse_uri(uri)
+            except ValueError:
+                continue
+            if bucket != store.bucket:
+                # same guard download_asset enforces — never sign for a key
+                # the uri doesn't actually point at
+                continue
+            thumbs[key_id] = store.presign_get(key)
+    return thumbs
 
 
 @router.get("/{asset_id}", response_model=AssetRead)
@@ -225,6 +279,24 @@ async def ingest_asset(
     return {"queued": job_key}
 
 
+@router.post("/{asset_id}/caption", status_code=202)
+async def caption_asset(
+    asset_id: uuid.UUID,
+    force: bool = False,
+    session: Session = Depends(get_session),
+    dispatcher=Depends(get_dispatcher),
+):
+    """Queue auto-captioning (M24): Florence-2 describes the poster frame and
+    the caption is re-embedded for resolver search. force=true overwrites an
+    existing caption; the default only fills placeholders."""
+    _get_or_404(session, asset_id)
+    job_key = f"caption-{asset_id}"
+    dispatcher.enqueue(
+        QUEUE_CPU, "worker_cpu.stages.caption_stage", str(asset_id), force, job_key=job_key
+    )
+    return {"queued": job_key}
+
+
 @router.get("/{asset_id}/derived")
 async def derived_media(
     asset_id: uuid.UUID,
@@ -237,6 +309,7 @@ async def derived_media(
     urls = {}
     for name, key in [
         ("proxy", f"{prefix}/proxy.mp4"),
+        ("poster", f"{prefix}/poster.jpg"),
         ("sprite", f"{prefix}/sprite.jpg"),
         ("vtt", f"{prefix}/sprite.vtt"),
         ("peaks", f"{prefix}/peaks.json"),
@@ -244,3 +317,44 @@ async def derived_media(
         if store.exists(key):
             urls[name] = store.presign_get(key)
     return urls
+
+
+@router.get("/{asset_id}/provenance")
+async def asset_provenance(asset_id: uuid.UUID, session: Session = Depends(get_session)):
+    """Walk the derivation chain (M13): each hop is an asset plus the
+    generation that produced it (null for stock/own roots). Ordered from the
+    requested asset back to the original source."""
+    from schema.models import Generation
+
+    _get_or_404(session, asset_id)
+    chain = []
+    current: uuid.UUID | None = asset_id
+    for _ in range(10):  # derivation chains are short; cap defends against cycles
+        if current is None:
+            break
+        asset = session.get(Asset, current)
+        if asset is None:
+            break
+        generation = session.exec(
+            select(Generation).where(Generation.asset_id == current)
+        ).first()
+        chain.append(
+            {
+                "asset": AssetRead.model_validate(asset).model_dump(mode="json"),
+                "generation": None
+                if generation is None
+                else {
+                    "id": str(generation.id),
+                    "provider": generation.provider,
+                    "model": generation.model,
+                    "kind": generation.kind.value,
+                    "prompt": generation.prompt,
+                    "params": generation.params,
+                    "source_asset_id": str(generation.source_asset_id)
+                    if generation.source_asset_id
+                    else None,
+                },
+            }
+        )
+        current = generation.source_asset_id if generation is not None else None
+    return chain

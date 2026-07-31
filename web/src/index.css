@@ -1,10 +1,157 @@
 @import "tailwindcss";
 
-/* Dark cinematic base — preset-first UX in the Higgsfield mold. */
+/* Theme-aware Higgsfield-mold shell. Semantic tokens drive every surface;
+   [data-theme] on <html> switches light/dark (toggle in the sidebar,
+   persisted, defaults to the OS preference — dark if unknown). */
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
+  color-scheme: light;
+  --bg: #f6f6f4;
+  --glow-a: rgba(101, 163, 13, 0.1);
+  --glow-b: rgba(139, 92, 246, 0.08);
+  --surface: rgba(0, 0, 0, 0.03);
+  --surface-dim: rgba(0, 0, 0, 0.02);
+  --surface2: rgba(0, 0, 0, 0.055);
+  --field: #ffffff;
+  --edge: rgba(0, 0, 0, 0.12);
+  --edge-soft: rgba(0, 0, 0, 0.06);
+  --edge-strong: rgba(0, 0, 0, 0.28);
+  --btn: rgba(0, 0, 0, 0.06);
+  --btn-hover: rgba(0, 0, 0, 0.11);
+  --sidebar: rgba(255, 255, 255, 0.72);
+  --tile-footer: rgba(255, 255, 255, 0.88);
+  --ink: #18181b;
+  --ink-soft: #3f3f46;
+  --ink-muted: #6b7280;
+  --ink-faint: #9ca3af;
+  --accent-ink: #4d7c0f;
+  --accent-soft: rgba(132, 204, 22, 0.16);
+  --accent-soft2: rgba(132, 204, 22, 0.3);
+  --danger: #dc2626;
+  --success: #059669;
+  --warn: #b45309;
+  --chip-emerald-bg: rgba(16, 185, 129, 0.14);
+  --chip-emerald-tx: #047857;
+  --chip-amber-bg: rgba(245, 158, 11, 0.16);
+  --chip-amber-tx: #92400e;
+  --chip-sky-bg: rgba(14, 165, 233, 0.14);
+  --chip-sky-tx: #0369a1;
+  --chip-red-bg: rgba(239, 68, 68, 0.13);
+  --chip-red-tx: #b91c1c;
+  --chip-neutral-bg: rgba(0, 0, 0, 0.07);
+  --chip-neutral-tx: #52525b;
+}
+
+[data-theme="dark"] {
   color-scheme: dark;
+  --bg: #050505;
+  --glow-a: rgba(190, 242, 100, 0.08);
+  --glow-b: rgba(139, 92, 246, 0.07);
+  --surface: rgba(255, 255, 255, 0.04);
+  --surface-dim: rgba(255, 255, 255, 0.02);
+  --surface2: rgba(255, 255, 255, 0.06);
+  --field: rgba(0, 0, 0, 0.4);
+  --edge: rgba(255, 255, 255, 0.1);
+  --edge-soft: rgba(255, 255, 255, 0.05);
+  --edge-strong: rgba(255, 255, 255, 0.3);
+  --btn: rgba(255, 255, 255, 0.1);
+  --btn-hover: rgba(255, 255, 255, 0.16);
+  --sidebar: rgba(0, 0, 0, 0.4);
+  --tile-footer: rgba(0, 0, 0, 0.6);
+  --ink: #f4f4f5;
+  --ink-soft: #d4d4d8;
+  --ink-muted: #8f8f98;
+  --ink-faint: #5b5b64;
+  --accent-ink: #bef264;
+  --accent-soft: rgba(190, 242, 100, 0.1);
+  --accent-soft2: rgba(190, 242, 100, 0.25);
+  --danger: #f87171;
+  --success: #34d399;
+  --warn: #fbbf24;
+  --chip-emerald-bg: rgba(52, 211, 153, 0.1);
+  --chip-emerald-tx: #6ee7b7;
+  --chip-amber-bg: rgba(251, 191, 36, 0.1);
+  --chip-amber-tx: #fcd34d;
+  --chip-sky-bg: rgba(56, 189, 248, 0.1);
+  --chip-sky-tx: #7dd3fc;
+  --chip-red-bg: rgba(248, 113, 113, 0.1);
+  --chip-red-tx: #fca5a5;
+  --chip-neutral-bg: rgba(255, 255, 255, 0.1);
+  --chip-neutral-tx: #d4d4d8;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface2: var(--surface2);
+  --color-field: var(--field);
+  --color-edge: var(--edge);
+  --color-edge-soft: var(--edge-soft);
+  --color-edge-strong: var(--edge-strong);
+  --color-btn: var(--btn);
+  --color-btn-hover: var(--btn-hover);
+  --color-sidebar: var(--sidebar);
+  --color-tile: var(--tile-footer);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-accent: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft2: var(--accent-soft2);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
 }
 
 body {
-  @apply bg-zinc-950 text-zinc-100 antialiased;
+  @apply antialiased;
+  background-color: var(--bg);
+  color: var(--ink);
+  background-image:
+    radial-gradient(1100px 560px at 88% -12%, var(--glow-a), transparent 62%),
+    radial-gradient(900px 520px at -12% 112%, var(--glow-b), transparent 60%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(190, 242, 100, 0.4);
+  color: #000;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--edge);
+  border-radius: 8px;
+}
+
+/* Status chips — one class per semantic colour, theme-aware via tokens. */
+.chip-emerald {
+  background: var(--chip-emerald-bg);
+  color: var(--chip-emerald-tx);
+}
+.chip-amber {
+  background: var(--chip-amber-bg);
+  color: var(--chip-amber-tx);
+}
+.chip-sky {
+  background: var(--chip-sky-bg);
+  color: var(--chip-sky-tx);
+}
+.chip-red {
+  background: var(--chip-red-bg);
+  color: var(--chip-red-tx);
+}
+.chip-neutral {
+  background: var(--chip-neutral-bg);
+  color: var(--chip-neutral-tx);
 }

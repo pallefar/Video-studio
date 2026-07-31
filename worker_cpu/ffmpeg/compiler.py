@@ -24,7 +24,22 @@ DUCK = "sidechaincompress=threshold=0.05:ratio=8:attack=20:release=300"
 
 
 def watermark_required(timeline: dict) -> bool:
-    return any(shot.get("origin") == "generated" for shot in timeline["shots"])
+    # C1 covers every synthetic pixel in frame — overlay clips included.
+    return any(shot.get("origin") == "generated" for shot in timeline["shots"]) or any(
+        ov.get("origin") == "generated" for ov in timeline.get("overlays", [])
+    )
+
+
+def expected_duration_ms(timeline: dict) -> int:
+    """Output duration of the compiled render: shot durations minus the
+    overlap consumed by each xfade transition. The progress reporter measures
+    rendered ms against this."""
+    shots = timeline["shots"]
+    total = sum(shot["duration_ms"] for shot in shots)
+    transition_ms = timeline.get("transition_ms", 0)
+    if transition_ms > 0 and len(shots) > 1:
+        total -= transition_ms * (len(shots) - 1)
+    return total
 
 
 def build_ffmpeg_args(
@@ -34,6 +49,7 @@ def build_ffmpeg_args(
     watermark_png: str | None,
     text_pngs: list[str] | None = None,
     music_paths: list[str] | None = None,
+    overlay_paths: list[str] | None = None,
     ffmpeg_bin: str = "ffmpeg",
 ) -> list[str]:
     shots = timeline["shots"]
@@ -47,6 +63,10 @@ def build_ffmpeg_args(
     music_paths = music_paths or []
     if len(music_paths) != len(music):
         raise ValueError("one input path per music clip required")
+    overlays = timeline.get("overlays", [])
+    overlay_paths = overlay_paths or []
+    if len(overlay_paths) != len(overlays):
+        raise ValueError("one input path per overlay clip required")
     width, height = timeline["width"], timeline["height"]
     needs_watermark = watermark_required(timeline)
     if needs_watermark and not watermark_png:
@@ -86,6 +106,16 @@ def build_ffmpeg_args(
         music_indices.append(input_count)
         input_count += 1
 
+    overlay_indices = []
+    for ov, path in zip(overlays, overlay_paths):
+        ov_in_s = ov.get("in_ms", 0) / 1000
+        ov_dur_s = (ov["out_ms"] - ov.get("in_ms", 0)) / 1000
+        if ov_in_s > 0:
+            args += ["-ss", f"{ov_in_s:.3f}"]
+        args += ["-t", f"{ov_dur_s:.3f}", "-i", path]
+        overlay_indices.append(input_count)
+        input_count += 1
+
     total_s = sum(durations)
     if use_xfade:
         total_s -= transition_s * (len(shots) - 1)
@@ -117,6 +147,23 @@ def build_ffmpeg_args(
         last = "vcat"
     else:
         last = "v0"
+
+    # Overlay video track (M15's post-MVP leftover): picture-in-picture,
+    # top-right, 1/3 frame width — under the text overlays, always under
+    # the C1 watermark.
+    for k, (ov, index) in enumerate(zip(overlays, overlay_indices)):
+        start_s = ov["start_ms"] / 1000
+        end_s = start_s + (ov["out_ms"] - ov.get("in_ms", 0)) / 1000
+        pip_w = width // 3
+        filters.append(
+            f"[{index}:v]fps={FPS},scale={pip_w}:-2,"
+            f"setpts=PTS-STARTPTS+{start_s:.3f}/TB[pip{k}]"
+        )
+        filters.append(
+            f"[{last}][pip{k}]overlay=W-w-24:24:eof_action=pass:"
+            f"enable='between(t,{start_s:.3f},{end_s:.3f})'[ov{k}]"
+        )
+        last = f"ov{k}"
 
     for n, (text, index) in enumerate(zip(texts, text_indices)):
         start_s = text["start_ms"] / 1000
@@ -167,8 +214,17 @@ def build_ffmpeg_args(
         for j, (clip, index) in enumerate(zip(music, music_indices)):
             delay_ms = int(clip["start_ms"])
             gain = clip.get("gain", 1.0)
+            clip_dur_s = (clip["out_ms"] - clip.get("in_ms", 0)) / 1000
+            # A1: fades run before gain/delay, capped to the clip length
+            fade_in_s = min(clip.get("fade_in_ms", 0) / 1000, clip_dur_s)
+            fade_out_s = min(clip.get("fade_out_ms", 0) / 1000, clip_dur_s)
+            fade = ""
+            if fade_in_s > 0:
+                fade += f"afade=t=in:st=0:d={fade_in_s:.3f},"
+            if fade_out_s > 0:
+                fade += f"afade=t=out:st={clip_dur_s - fade_out_s:.3f}:d={fade_out_s:.3f},"
             filters.append(
-                f"[{index}:a]{_ANORM},volume={gain:.3f},adelay={delay_ms}|{delay_ms}[mc{j}]"
+                f"[{index}:a]{_ANORM},{fade}volume={gain:.3f},adelay={delay_ms}|{delay_ms}[mc{j}]"
             )
         if len(music) == 1:
             merged = "mc0"

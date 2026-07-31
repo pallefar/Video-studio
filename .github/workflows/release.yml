@@ -1,0 +1,85 @@
+name: Release
+
+# One release per big milestone. Three ways to cut one — all end in the
+# same packaged GitHub Release (macOS + Windows bundles, checksums, notes
+# from the milestone log):
+#
+#   1. git tag v0.29.0 && git push origin v0.29.0
+#   2. Actions -> Release -> Run workflow, with the version input
+#   3. commit a VERSION bump with message "release: v0.29.0" and push
+#      (the path available to remote sessions that cannot push tags —
+#      the release step creates the tag at that commit itself)
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v0.29.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: >-
+      github.ref_type == 'tag' ||
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.head_commit.message, 'release:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            V="${{ inputs.version }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME}"
+          else
+            V="$(cat VERSION)"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "releasing $V"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the control panel
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package platform bundles
+        run: bash scripts/make_release.sh "${{ steps.version.outputs.version }}"
+
+      - name: Release notes from the milestone log
+        run: python3 scripts/release_notes.py > dist-release/NOTES.md
+
+      # Create (or move) the tag at THIS commit before publishing — without
+      # this, the release action would create it at the default branch head.
+      - name: Point the tag at this commit
+        if: github.ref_type != 'tag'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "${{ steps.version.outputs.version }}"
+          git push -f origin "refs/tags/${{ steps.version.outputs.version }}"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Video Studio ${{ steps.version.outputs.version }}
+          body_path: dist-release/NOTES.md
+          files: |
+            dist-release/*.zip
+            dist-release/SHA256SUMS.txt

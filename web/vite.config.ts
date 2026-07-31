@@ -7,18 +7,13 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    proxy: {
-      "/jobs": "http://localhost:8000",
-      "/loops": "http://localhost:8000",
-      "/voices": "http://localhost:8000",
-      "/assets": "http://localhost:8000",
-      "/generations": "http://localhost:8000",
-      "/presets": "http://localhost:8000",
-      "/storyboards": "http://localhost:8000",
-      "/styles": "http://localhost:8000",
-      "/projects": "http://localhost:8000",
-      "/timelines": "http://localhost:8000",
-      "/healthz": "http://localhost:8000",
-    },
+    proxy: Object.fromEntries(
+      [
+        "/jobs", "/loops", "/voices", "/assets", "/generations", "/presets",
+        "/storyboards", "/styles", "/projects", "/timelines", "/healthz",
+        "/identities", "/images", "/effects", "/emotions", "/music", "/metrics", "/stats",
+        "/config", "/prompts",
+      ].map((route) => [route, "http://localhost:8000"]),
+    ),
   },
 });
