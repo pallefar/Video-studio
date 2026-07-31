@@ -60,6 +60,10 @@ def _get_or_404(session: Session, asset_id: uuid.UUID) -> Asset:
 @router.post("", response_model=AssetRead, status_code=201)
 async def create_asset(body: AssetCreate, session: Session = Depends(get_session)):
     asset = Asset.model_validate(body)
+    # embed at creation like every other ingest path — an asset without an
+    # embedding is invisible to the resolver's cosine search
+    if body.caption:
+        asset.embedding = get_embedder_dep().embed(body.caption)
     session.add(asset)
     session.commit()
     session.refresh(asset)

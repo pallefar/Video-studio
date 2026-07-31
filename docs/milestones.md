@@ -117,7 +117,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 ## M10 — Generation provider layer + wan-lane executor
 
 - [x] `GenerationProvider` interface: capability discovery, submit, poll, fetch-to-MinIO; every output lands as an `Asset` (`origin='generated'`) with provider/model/params/cost provenance
-- [ ] Local provider: wan-lane executor (decide ComfyUI headless vs diffusers here) running Wan 2.2 T2V/I2V under the existing GPU lock *(lane routing + lock wrapper landed; the executor itself is the workstation decision)*
+- [x] Local provider: wan-lane executor — **ComfyUI headless decided and landed**: `pipeline_core/comfy.py` submit→poll→fetch client + per-model workflow templates as package data, CPU-proven against a fake ComfyUI (`tests/test_comfy.py`); `DEV_ENGINES=1` placeholder executor covers non-CUDA e2e; real-weights rendering = `COMFY_URL` config on the workstation (docs/workstation.md)
 - [x] API provider class: aggregator gateway first (fal.ai) — keys from env only, unconfigured providers don't appear in the registry *(direct Sora/Veo integrations still open)*
 - [x] API jobs run as network jobs on the CPU lane — never touch the GPU lock
 - [x] Fallback chains: a request may declare provider preference order *(cross-lane re-dispatch on failure)*
@@ -128,7 +128,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 ## M11 — Camera presets (the signature)
 
 - [x] Preset registry as data (JSON): camera moves (crash zoom, dolly, dolly-zoom, orbit, FPV, bullet time…) with prompt templates + LoRA refs, stackable up to 3 *(16 presets in `pipeline_core/presets.py`; unaudited-LoRA validation structural)*
-- [ ] Wan2.2-Fun-Control-Camera integration in the local provider; Civitai LoRAs individually licence-audited before inclusion *(motion codes + params wired through; executor is the M10 workstation task)*
+- [ ] Wan2.2-Fun-Control-Camera integration in the local provider; Civitai LoRAs individually licence-audited before inclusion *(motion codes + params wired through; runs once COMFY_URL points at the workstation ComfyUI — docs/workstation.md)*
 - [x] Preset picker UI: preset → subject → generate (preset-first, prompt optional) — Higgsfield-style dark gallery, stack up to 3, engine picker from the provider catalog, live generation feed
 - [ ] Advanced mode: Uni3C custom trajectories; ReCamMaster re-shoot of existing footage
 
@@ -145,7 +145,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 ## M13 — VFX & finishing lane
 
-- [x] Effect preset registry over Wan2.2-VACE-Fun (v2v restyle, levitation/disintegrate/fire-class effects); VACE 1.3B fast-preview path *(10 effects in `pipeline_core/effects.py`; `POST /effects/apply` with `preview` routing to the 1.3B model; rendering waits on the M10 executor like every local model)*
+- [x] Effect preset registry over Wan2.2-VACE-Fun (v2v restyle, levitation/disintegrate/fire-class effects); VACE 1.3B fast-preview path *(10 effects in `pipeline_core/effects.py`; `POST /effects/apply` with `preview` routing to the 1.3B model; renders once COMFY_URL is configured — docs/workstation.md)*
 - [x] Upscale/interpolate finishing: SeedVR2-3B hero shots, Real-ESRGAN + FILM cheap lane *(RIFE stays out per the licence register's training-data caveat; `POST /effects/upscale`)*
 - [x] Effects stack with camera presets (Higgsfield "Mix" mechanic) *(`compose_mix` reuses the M11 camera stack rules; motion codes ride along in params)*
 

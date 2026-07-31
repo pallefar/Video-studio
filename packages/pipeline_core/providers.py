@@ -68,11 +68,17 @@ class GenerationProvider(Protocol):
 
 class LocalWanProvider:
     """The wan-lane executor on this machine. Model roster per roadmap-v2 §2.
-    The executor itself (ComfyUI headless vs diffusers) is the M10 workstation
-    decision — until it lands, generate() raises with a clear message."""
+    Execution order: DEV_ENGINES placeholder synthesis, else the headless
+    ComfyUI configured by COMFY_URL (the M10 decision), else a config hint —
+    which surfaces inside run_generation's fallback handling, so a declared
+    API fallback still completes the request."""
 
     name = LOCAL_PROVIDER
     provider_class = CLASS_LOCAL
+
+    def __init__(self, settings: Optional[Settings] = None):
+        self._settings = settings
+        self._dev_executor = None
 
     def models(self) -> list[ModelSpec]:
         video = frozenset({GenerationKind.text_to_video, GenerationKind.image_to_video})
@@ -103,8 +109,22 @@ class LocalWanProvider:
         ]
 
     def generate(self, generation: Generation) -> ProviderResult:
-        raise NotImplementedError(
-            "M10 workstation task: wan-lane executor (ComfyUI headless vs diffusers)"
+        settings = self._settings or Settings()
+        if settings.dev_engines:
+            from pipeline_core.dev_generation import DevGenerationExecutor
+
+            if self._dev_executor is None:
+                self._dev_executor = DevGenerationExecutor()
+            return self._dev_executor.generate(generation)
+
+        from pipeline_core.comfy import ComfyUINotConfiguredError, run_comfy_generation
+
+        if not settings.comfy_url:
+            raise ComfyUINotConfiguredError()
+        data, content_type, prompt_id = run_comfy_generation(generation, settings=settings)
+        # cost 0.0, not None: local generation is free, distinct from unpriced
+        return ProviderResult(
+            data=data, content_type=content_type, external_id=prompt_id, cost=0.0
         )
 
 

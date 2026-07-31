@@ -74,6 +74,9 @@ packages = [
     "studio_mcp",
 ]
 
+[tool.setuptools.package-data]
+pipeline_core = ["workflows/*.json"]
+
 [tool.setuptools.package-dir]
 schema = "packages/schema"
 pipeline_core = "packages/pipeline_core"

@@ -40,7 +40,13 @@ class Settings(BaseSettings):
     # deterministic heuristic enhancer is used.
     qwen_model_path: str = ""
 
-    # Dev engines (DEV_ENGINES=1): placeholder TTS/lipsync so the full avatar
-    # pipeline runs end-to-end on machines without CUDA (Apple Silicon, CI).
-    # Output is watchable but NOT production: static avatar, synthetic voice.
+    # Dev engines (DEV_ENGINES=1): placeholder TTS/lipsync/generation so the
+    # full pipeline runs end-to-end on machines without CUDA (Apple Silicon,
+    # CI). Output is watchable but NOT production.
     dev_engines: bool = False
+
+    # ComfyUI headless — the M10 wan-lane executor. Unconfigured -> local
+    # generation raises a config hint (and declared fallbacks still run).
+    comfy_url: str = ""
+    comfy_poll_interval_s: float = 2.0
+    comfy_timeout_s: int = 3600
