@@ -184,6 +184,13 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
             store.get_file(key, local)
             music_paths.append(str(local))
 
+        overlay_paths = []
+        for n, clip in enumerate(timeline.get("overlays", [])):
+            _, key = store.parse_uri(clip["asset_uri"])
+            local = tmp_path / f"overlay_{n}.mp4"
+            store.get_file(key, local)
+            overlay_paths.append(str(local))
+
         overlay = None
         if watermark_required(timeline):
             overlay = str(
@@ -198,7 +205,8 @@ def export_stage(storyboard_id: str, timeline: dict) -> str | None:
         output = tmp_path / "render.mp4"
         args = build_ffmpeg_args(
             timeline, shot_paths, str(output), overlay,
-            text_pngs=text_pngs, music_paths=music_paths, ffmpeg_bin=binary,
+            text_pngs=text_pngs, music_paths=music_paths,
+            overlay_paths=overlay_paths, ffmpeg_bin=binary,
         )
         recorder = _ProgressRecorder(storyboard_id, expected_duration_ms(timeline))
         recorder.start()

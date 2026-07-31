@@ -190,6 +190,60 @@ def test_media_endpoint_includes_audio_track_assets(client, session):
         assert music.uri.split("/")[-1] in media[str(music.id)]
 
 
+def test_export_serialises_overlay_track(client, session, dispatcher):
+    """A3: video_tracks[1] flows into the render timeline as PiP overlays,
+    origin included so a generated overlay forces C1 in the compiler."""
+    base = _seed_asset(session)
+    pip = _seed_asset(session, caption="pip clip", origin=AssetOrigin.generated)
+    timeline = client.post("/timelines", json={"title": "With PiP"}).json()
+    doc = {
+        "video_tracks": [
+            [_clip(0, 0, 4000, asset_id=str(base.id))],
+            [_clip(1000, 0, 2000, asset_id=str(pip.id))],
+        ],
+    }
+    response = client.put(
+        f"/timelines/{timeline['id']}", json={"doc": doc, "base_version": 1}
+    )
+    assert response.status_code == 200, response.text
+
+    render = client.post(f"/timelines/{timeline['id']}/export").json()["timeline"]
+    assert len(render["overlays"]) == 1
+    overlay = render["overlays"][0]
+    assert overlay["start_ms"] == 1000 and overlay["out_ms"] == 2000
+    assert overlay["origin"] == "generated"
+    assert overlay["asset_uri"] == pip.uri
+
+
+def test_audio_fades_flow_into_export(client, session, dispatcher):
+    video = _seed_asset(session)
+    bed = _seed_asset(session, caption="bed")
+    timeline = client.post("/timelines", json={"title": "Faded"}).json()
+    doc = {
+        "video_tracks": [[_clip(0, 0, 4000, asset_id=str(video.id))]],
+        "audio_tracks": [[{
+            "id": "a1", "asset_id": str(bed.id), "start_ms": 0, "in_ms": 0,
+            "out_ms": 4000, "gain": 1.0, "duck": True,
+            "fade_in_ms": 500, "fade_out_ms": 250,
+        }]],
+    }
+    client.put(f"/timelines/{timeline['id']}", json={"doc": doc, "base_version": 1})
+    render = client.post(f"/timelines/{timeline['id']}/export").json()["timeline"]
+    assert render["music"][0]["fade_in_ms"] == 500
+    assert render["music"][0]["fade_out_ms"] == 250
+
+
+def test_audio_clip_rejects_fades_longer_than_clip():
+    with pytest.raises(ValidationError, match="fade"):
+        TimelineDocument(
+            video_tracks=[[]],
+            audio_tracks=[[{
+                "id": "a", "asset_id": "x", "start_ms": 0, "in_ms": 0,
+                "out_ms": 1000, "fade_in_ms": 800, "fade_out_ms": 400,
+            }]],
+        )
+
+
 # --- Export with trims and text overlays ------------------------------------
 
 

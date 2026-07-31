@@ -211,6 +211,21 @@ async def export_timeline(
                 )
             music.append({**clip.model_dump(), "asset_uri": asset.uri})
 
+    # Overlay track (video_tracks[1], M15 post-MVP): rendered as PiP by the
+    # compiler. Origin rides along — a generated overlay forces C1 like a
+    # generated shot.
+    overlays = []
+    for track in doc.video_tracks[1:2]:
+        for clip in sorted(track, key=lambda c: c.start_ms):
+            asset = session.get(Asset, uuid.UUID(clip.asset_id))
+            if asset is None:
+                raise HTTPException(
+                    status_code=409, detail=f"overlay clip {clip.id} references a missing asset"
+                )
+            overlays.append(
+                {**clip.model_dump(), "asset_uri": asset.uri, "origin": asset.origin.value}
+            )
+
     render_timeline = {
         "storyboard_id": str(timeline.storyboard_id) if timeline.storyboard_id else str(timeline.id),
         "timeline_id": str(timeline.id),
@@ -223,6 +238,7 @@ async def export_timeline(
         "transition_ms": doc.transition_ms,
         "shots": shots,
         "music": music,
+        "overlays": overlays,
         "texts": [text.model_dump() for text in sorted(doc.texts, key=lambda t: t.start_ms)],
     }
     dispatcher.enqueue(

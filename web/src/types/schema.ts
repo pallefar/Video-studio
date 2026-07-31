@@ -318,6 +318,8 @@ export interface AudioClip {
   out_ms: number;
   gain?: number;
   duck?: boolean;
+  fade_in_ms?: number;
+  fade_out_ms?: number;
 }
 
 export interface TextClip {

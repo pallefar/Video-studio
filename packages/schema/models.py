@@ -720,7 +720,8 @@ class TimelineClip(BaseModel):
 
 
 class AudioClip(BaseModel):
-    """Music/audio-bed clip. Ducked under shot audio by default (M18)."""
+    """Music/audio-bed clip. Ducked under shot audio by default (M18);
+    fade_in/out are applied by the M16 compiler before gain/delay."""
 
     id: str
     asset_id: str
@@ -729,6 +730,8 @@ class AudioClip(BaseModel):
     out_ms: int
     gain: float = 1.0
     duck: bool = True
+    fade_in_ms: int = 0
+    fade_out_ms: int = 0
 
     @model_validator(mode="after")
     def _valid_range(self) -> "AudioClip":
@@ -738,6 +741,10 @@ class AudioClip(BaseModel):
             raise ValueError("clip out_ms must be greater than in_ms")
         if not 0.0 <= self.gain <= 4.0:
             raise ValueError("gain must be within [0, 4]")
+        if self.fade_in_ms < 0 or self.fade_out_ms < 0:
+            raise ValueError("fades must be non-negative")
+        if self.fade_in_ms + self.fade_out_ms > self.out_ms - self.in_ms:
+            raise ValueError("fades cannot exceed the clip length")
         return self
 
 
