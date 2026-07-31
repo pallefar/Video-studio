@@ -6,7 +6,16 @@ aggregator over local GPUs and API providers. Python API + workers, React
 panel. Full architecture: `CLAUDE.md`, `docs/pipeline-spec.md`,
 `docs/roadmap-v2.md`.
 
-## Quick start
+## Install from a release (easiest)
+
+Grab `video-studio-<version>-macos.zip` or `-windows.zip` from the
+[releases page](https://github.com/pallefar/Video-studio/releases), unzip,
+and follow the GETTING-STARTED.txt inside. Release bundles ship the control
+panel prebuilt, so the only prerequisites are Docker Desktop and
+Python 3.11 — no Node. A release is cut after each big milestone
+(`docs/ops.md` §Releases).
+
+## Quick start (from a checkout)
 
 The setup script checks every dependency (git, Python 3.11+, Node 20+,
 Docker), installs what's missing, prepares the database/bucket, and can

@@ -110,3 +110,29 @@ wouldn't hand the panel to.
 `.env.example` is the canonical variable list — every `Settings` field
 appears in it, enforced by the drift guard in `tests/test_ops.py`. New
 setting ⇒ add it to both files or CI fails.
+
+## Releases
+
+One release per big milestone. Cutting one is two commands:
+
+```bash
+git tag v0.<milestone>.0        # e.g. v0.29.0 after M29
+git push origin v0.<milestone>.0
+```
+
+`.github/workflows/release.yml` then builds the panel, runs
+`scripts/make_release.sh`, and publishes a GitHub Release with
+`video-studio-<tag>-macos.zip`, `video-studio-<tag>-windows.zip`,
+`SHA256SUMS.txt`, and notes taken from the latest section of
+docs/milestones.md (`scripts/release_notes.py`).
+
+Bundle guarantees (guarded by `tests/test_release.py`):
+
+- Contents come from `git archive` — tracked files only, so `.env`, local
+  databases and node_modules can never leak into a release.
+- The control panel ships prebuilt (`web/dist`), and the API serves it
+  itself — release users need Docker Desktop + Python 3.11, **not Node**.
+- Each zip carries a platform GETTING-STARTED.txt: `./scripts/setup.sh
+  --start` on macOS, `scripts\setup.ps1 -Start` on Windows.
+- Upgrades: unzip the new version, copy `.env` across; alembic migrates
+  the database on API start.

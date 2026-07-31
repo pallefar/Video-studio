@@ -28,3 +28,4 @@ web/dist/
 # Model weights (downloaded via scripts, never committed)
 weights/
 dump.rdb
+dist-release/

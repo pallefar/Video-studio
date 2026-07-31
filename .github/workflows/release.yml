@@ -1,0 +1,47 @@
+name: Release
+
+# One release per big milestone: push a v* tag and this packages the
+# macOS + Windows bundles (prebuilt panel included — no Node needed by
+# users) and publishes a GitHub Release with notes from the milestone log.
+#
+#   git tag v0.29.0 && git push origin v0.29.0
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the control panel
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package platform bundles
+        run: bash scripts/make_release.sh "${GITHUB_REF_NAME}"
+
+      - name: Release notes from the milestone log
+        run: python3 scripts/release_notes.py > dist-release/NOTES.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Video Studio ${{ github.ref_name }}
+          body_path: dist-release/NOTES.md
+          files: |
+            dist-release/*.zip
+            dist-release/SHA256SUMS.txt

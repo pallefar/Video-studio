@@ -1,0 +1,30 @@
+Video Studio — getting started on Windows
+=========================================
+
+Prerequisites
+  - Docker Desktop (for Postgres / Redis / MinIO)
+  - Python 3.11+ (python.org installer, "Add to PATH" checked)
+  - ffmpeg is installed automatically by the setup script when missing
+  - Node is NOT required: this bundle ships the control panel prebuilt
+    (web/dist) and the API serves it itself.
+
+First run
+  1. unzip, then in PowerShell:
+       cd video-studio-<version>
+       powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Start
+     The script checks every dependency, installs what's missing, starts
+     docker services, prepares the database and bucket, and launches the
+     studio. Later starts: scripts\start.ps1
+  2. open http://127.0.0.1:8000 — the Settings tab shows what's configured.
+
+Without an NVIDIA GPU the studio runs in dev-engine mode: placeholder
+voice/lipsync/generation so every flow works end to end. Real rendering
+happens on the GPU workstation (RTX 3090) — docs/workstation.md is the
+runbook (ComfyUI install, model weights, node packs).
+
+Configuration lives in .env (copy .env.example). API keys (fal.ai,
+ElevenLabs, Pexels, YouTube) are optional — features appear when their
+key is set.
+
+Upgrading: unzip the new release next to the old one and copy your .env
+across. The database migrates automatically on API start (alembic).
