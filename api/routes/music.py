@@ -65,3 +65,55 @@ async def generate_music(
     session.refresh(generation)
     enqueue_generation(dispatcher, generation, registry)
     return generation
+
+
+# --- M28: voiceover lines (Chatterbox on the render lane) -------------------
+
+VOICE_LICENSE = "Generated (Chatterbox, MIT)"
+DEFAULT_VOICE_MODEL = "chatterbox"
+
+
+class VoiceoverRequest(BaseModel):
+    text: str = Field(min_length=2, max_length=2000)
+    voice_profile_id: uuid.UUID | None = None
+    provider: str = DEFAULT_PROVIDER
+    model: str = DEFAULT_VOICE_MODEL
+    project_id: uuid.UUID | None = None
+
+
+@router.post("/voice", response_model=GenerationRead, status_code=201)
+async def generate_voiceover(
+    body: VoiceoverRequest,
+    session: Session = Depends(get_session),
+    registry: ProviderRegistry = Depends(get_registry),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+):
+    """Standalone voiceover: a spoken line landing as a library audio asset,
+    ready for the editor's bed lane or a talking photo."""
+    from schema.models import VoiceProfile
+
+    try:
+        registry.resolve(body.provider, body.model, GenerationKind.voice)
+    except UnknownModelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.project_id is not None and session.get(Project, body.project_id) is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    params: dict = {"purpose": "voiceover", "asset_license": VOICE_LICENSE}
+    if body.voice_profile_id is not None:
+        if session.get(VoiceProfile, body.voice_profile_id) is None:
+            raise HTTPException(status_code=404, detail="voice profile not found")
+        params["voice_profile_id"] = str(body.voice_profile_id)
+
+    generation = Generation(
+        provider=body.provider,
+        model=body.model,
+        kind=GenerationKind.voice,
+        prompt=body.text,
+        params=params,
+        project_id=body.project_id,
+    )
+    session.add(generation)
+    session.commit()
+    session.refresh(generation)
+    enqueue_generation(dispatcher, generation, registry)
+    return generation

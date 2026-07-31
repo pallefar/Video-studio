@@ -5,7 +5,7 @@ export type JobStatus = "queued" | "tts" | "lipsync" | "assemble" | "review" | "
 
 export type AssetOrigin = "generated" | "stock" | "own";
 
-export type GenerationKind = "text_to_video" | "image_to_video" | "video_to_video" | "image" | "upscale" | "music";
+export type GenerationKind = "text_to_video" | "image_to_video" | "video_to_video" | "image" | "upscale" | "music" | "talking_image" | "voice";
 
 export type GenerationStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 

@@ -1,0 +1,30 @@
+{
+  "output": {
+    "node": "40",
+    "kind": "audio"
+  },
+  "defaults": {},
+  "inputs": {
+    "prompt": ["10", "inputs", "text"],
+    "seed": ["10", "inputs", "seed"]
+  },
+  "required": ["prompt"],
+  "graph": {
+    "10": {
+      "class_type": "ChatterboxTTS",
+      "inputs": {
+        "text": "",
+        "seed": 0,
+        "exaggeration": 0.5,
+        "cfg_weight": 0.5
+      }
+    },
+    "40": {
+      "class_type": "SaveAudio",
+      "inputs": {
+        "audio": ["10", 0],
+        "filename_prefix": "studio-voice"
+      }
+    }
+  }
+}

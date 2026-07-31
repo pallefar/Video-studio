@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { applyTheme, initialTheme, type Theme } from "./lib";
+import AudioView from "./components/AudioView";
 import AvatarView from "./components/AvatarView";
 import DashboardView from "./components/DashboardView";
 import CreateView from "./components/CreateView";
@@ -19,6 +20,7 @@ type Tab =
   | "create"
   | "images"
   | "avatar"
+  | "audio"
   | "prompts"
   | "storyboards"
   | "editor"
@@ -32,6 +34,7 @@ const ICONS: Record<Tab, string> = {
   create: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9L19 15z",
   images: "M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm3 9l3-3 3 3 4-4 3 3M8.5 9.5a1 1 0 100.001 0z",
   avatar: "M12 12a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0",
+  audio: "M9 18V6l10-2v12M9 18a3 3 0 11-6 0 3 3 0 016 0zm10-2a3 3 0 11-6 0 3 3 0 016 0z",
   prompts: "M8 9h8M8 13h5M21 12a9 9 0 11-4.4-7.7M17 3h5v5",
   storyboards: "M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm4 0v14M16 5v14M3 10h18M3 14h18",
   editor: "M3 8h18M3 12h12M3 16h15M19 12l3 2-3 2v-4z",
@@ -42,7 +45,7 @@ const ICONS: Record<Tab, string> = {
 
 const GROUPS: { label: string; tabs: Tab[] }[] = [
   { label: "Studio", tabs: ["home"] },
-  { label: "Generate", tabs: ["create", "images", "avatar", "prompts"] },
+  { label: "Generate", tabs: ["create", "images", "audio", "avatar", "prompts"] },
   { label: "Produce", tabs: ["storyboards", "editor"] },
   { label: "Manage", tabs: ["projects", "library", "identities", "settings"] },
 ];
@@ -53,6 +56,7 @@ const TITLES: Record<Tab, [string, string]> = {
   create: ["Create", "Preset-first video: pick a move, drop a subject, generate."],
   images: ["Image studio", "Styled stills, storyboard frames, thumbnails."],
   avatar: ["Avatar", "Script → voice → lip-sync → review → publish, always private."],
+  audio: ["Audio", "Music beds (ACE-Step) and voiceover lines (Chatterbox), licence-clean."],
   prompts: ["Prompts", "Prompt engineering as a catalog — plus reverse prompts from any asset."],
   storyboards: ["Storyboards", "Plan shots, generate per beat, export a real render."],
   editor: ["Editor", "Multi-track timeline over proxies, server-side final render."],
@@ -157,6 +161,7 @@ export default function App() {
           {tab === "create" && <CreateView />}
           {tab === "images" && <ImagesView />}
           {tab === "avatar" && <AvatarView />}
+          {tab === "audio" && <AudioView />}
           {tab === "prompts" && <PromptsView />}
           {tab === "storyboards" && <StoryboardsView onOpenEditor={openEditor} />}
           {tab === "editor" && <EditorView openId={editorTimelineId} />}

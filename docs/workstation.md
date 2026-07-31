@@ -16,6 +16,13 @@ first, always.
 
 ## 1. ComfyUI headless (the M10 executor)
 
+One-command install (clone + venv + torch + requirements, prints the
+wiring steps): `./scripts/install_comfyui.sh`. The Settings tab shows the
+live connection state — **online** when `/system_stats` answers, not just
+when `COMFY_URL` is set. The studio's client (`pipeline_core/comfy.py`)
+has been proven against a real ComfyUI end-to-end (submit → poll → fetch).
+
+
 ComfyUI is a service dependency exactly like MinIO: our worker submits an
 API-format node graph (`POST /prompt`), polls `/history/{prompt_id}`, and
 downloads outputs via `/view`. Install it in its **own venv**, run it

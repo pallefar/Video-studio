@@ -237,7 +237,14 @@ def build_values(generation: Generation, template: dict, client: ComfyUIClient,
             GenerationKind.video_to_video, GenerationKind.upscale
         ) else "source_image"
         values[target] = uploaded
-    elif params.get("image_uri"):
+    if params.get("audio_asset_uri"):
+        _, key = store.parse_uri(params["audio_asset_uri"])
+        data = store.get_bytes(key)
+        values["source_audio"] = client.upload(data, f"{generation.id}-audio-{key.rsplit('/', 1)[-1]}")
+    if params.get("script"):
+        values["script"] = params["script"]
+
+    if not params.get("source_asset_uri") and params.get("image_uri"):
         _, key = store.parse_uri(params["image_uri"])
         values["source_image"] = client.upload(
             store.get_bytes(key), f"{generation.id}-{key.rsplit('/', 1)[-1]}"

@@ -11,10 +11,28 @@ from pipeline_core.settings import Settings
 router = APIRouter(tags=["config"])
 
 
+def _comfy_online(settings: Settings) -> bool:
+    """Live reachability, not just configuration: pings ComfyUI's
+    /system_stats with a short timeout so Settings can show connected vs
+    merely configured."""
+    if not settings.comfy_url:
+        return False
+    try:
+        import httpx
+
+        response = httpx.get(
+            f"{settings.comfy_url.rstrip('/')}/system_stats", timeout=1.5
+        )
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
 @router.get("/config")
 async def config_status() -> dict[str, bool]:
     settings = Settings()
     return {
+        "comfy_online": _comfy_online(settings),
         "dev_engines": bool(settings.dev_engines),
         "comfy_configured": bool(settings.comfy_url),
         "fal_configured": bool(settings.fal_api_key),

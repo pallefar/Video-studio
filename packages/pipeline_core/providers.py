@@ -109,6 +109,12 @@ class LocalWanProvider:
             # Audio suite (M18): ACE-Step base fits the render lane's headroom.
             ModelSpec(self.name, "ace-step", frozenset({GenerationKind.music}),
                       CLASS_LOCAL, "music beds, M18 (Apache 2.0)", lane=LANE_SHARED, est_cost=0.0),
+            # Talking/singing photos + voiceovers (M28) ride the render lane:
+            # MuseTalk and Chatterbox are its residents (both MIT).
+            ModelSpec(self.name, "musetalk-image", frozenset({GenerationKind.talking_image}),
+                      CLASS_LOCAL, "talking/singing photo, M28 (MIT)", lane=LANE_SHARED, est_cost=0.0),
+            ModelSpec(self.name, "chatterbox", frozenset({GenerationKind.voice}),
+                      CLASS_LOCAL, "voiceover lines, M28 (MIT)", lane=LANE_SHARED, est_cost=0.0),
         ]
 
     def generate(self, generation: Generation) -> ProviderResult:

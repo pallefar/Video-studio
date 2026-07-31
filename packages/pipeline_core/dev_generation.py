@@ -144,15 +144,94 @@ class DevGenerationExecutor:
                     external_id=external_id, cost=0.0,
                 )
 
-            # t2v / i2v / v2v: prompt card looped into a short clip
+            if kind == GenerationKind.voice:
+                # speech-shaped placeholder: duration tracks the line length
+                words = max(1, len((generation.prompt or "").split()))
+                duration_s = min(words * 0.35, 20.0)
+                base = 160 + seed % 80
+                wav = tmp_path / "voice.wav"
+                _run([_find_ffmpeg(), "-y", "-hide_banner",
+                      "-f", "lavfi",
+                      "-i", f"sine=frequency={base}:sample_rate=44100:duration={duration_s:.1f}",
+                      "-af", "tremolo=f=8:d=0.8,volume=0.5",
+                      "-c:a", "pcm_s16le", str(wav)])
+                return ProviderResult(
+                    data=wav.read_bytes(), content_type="audio/wav",
+                    external_id=external_id, cost=0.0,
+                )
+
+            if kind == GenerationKind.talking_image:
+                width, height = _dims({**params, "width": params.get("width", 720),
+                                       "height": params.get("height", 720)})
+                still = self._fetch_source(params, tmp_path) or _prompt_card(
+                    tmp_path / "card.png", generation.prompt or "talking image",
+                    width, height, seed,
+                )
+                audio_uri = params.get("audio_asset_uri")
+                if audio_uri:
+                    _, key = self.store.parse_uri(audio_uri)
+                    audio = tmp_path / "track"
+                    self.store.get_file(key, audio)
+                    duration_args = ["-shortest"]
+                else:
+                    words = max(1, len((params.get("script") or generation.prompt or "hi").split()))
+                    duration_s = min(words * 0.35, 15.0)
+                    audio = tmp_path / "speech.wav"
+                    _run([_find_ffmpeg(), "-y", "-hide_banner", "-f", "lavfi",
+                          "-i", f"sine=frequency=180:sample_rate=44100:duration={duration_s:.1f}",
+                          "-af", "tremolo=f=8:d=0.8,volume=0.5", "-c:a", "pcm_s16le", str(audio)])
+                    duration_args = ["-shortest"]
+                clip = tmp_path / "talk.mp4"
+                _run([_find_ffmpeg(), "-y", "-hide_banner",
+                      "-loop", "1", "-i", str(still), "-i", str(audio),
+                      "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                      "-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p",
+                      "-c:a", "aac", *duration_args, str(clip)])
+                return ProviderResult(
+                    data=clip.read_bytes(), content_type="video/mp4",
+                    external_id=external_id, cost=0.0,
+                )
+
             width, height = _dims(params)
             duration_s = min(float(params.get("duration_s", 3)), MAX_CLIP_S)
-            card = _prompt_card(tmp_path / "card.png", generation.prompt, width, height, seed)
+            source = (
+                self._fetch_source(params, tmp_path)
+                if kind == GenerationKind.image_to_video
+                else None
+            )
             clip = tmp_path / "clip.mp4"
-            _run([_find_ffmpeg(), "-y", "-hide_banner", "-loop", "1", "-i", str(card),
-                  "-t", f"{duration_s:.2f}", "-r", "16",
-                  "-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p", str(clip)])
+            if source is not None:
+                # animate the actual still: slow push-in — the cheap-b-roll
+                # placeholder mirrors what the real i2v lane will do
+                frames = int(duration_s * 16)
+                _run([_find_ffmpeg(), "-y", "-hide_banner", "-loop", "1",
+                      "-i", str(source), "-t", f"{duration_s:.2f}",
+                      "-vf",
+                      f"scale={width * 2}:{height * 2}:force_original_aspect_ratio=increase,"
+                      f"crop={width * 2}:{height * 2},"
+                      f"zoompan=z='min(zoom+0.0015,1.25)':d=1:"
+                      f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={width}x{height}:fps=16",
+                      "-frames:v", str(frames),
+                      "-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p", str(clip)])
+            else:
+                # t2v / v2v: prompt card looped into a short clip
+                card = _prompt_card(tmp_path / "card.png", generation.prompt, width, height, seed)
+                _run([_find_ffmpeg(), "-y", "-hide_banner", "-loop", "1", "-i", str(card),
+                      "-t", f"{duration_s:.2f}", "-r", "16",
+                      "-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p", str(clip)])
             return ProviderResult(
                 data=clip.read_bytes(), content_type="video/mp4",
                 external_id=external_id, cost=0.0,
             )
+
+    def _fetch_source(self, params: dict, tmp_path: Path) -> Path | None:
+        """Fetch the source still for i2v/talking kinds when it lives in the
+        object store; None falls back to the prompt card."""
+        uri = params.get("source_asset_uri") or params.get("image_uri")
+        if not uri or not str(uri).startswith("s3://"):
+            return None
+        _, key = self.store.parse_uri(str(uri))
+        local = tmp_path / "source_image"
+        self.store.get_file(key, local)
+        return local

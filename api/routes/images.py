@@ -192,3 +192,135 @@ async def generate_thumbnail(
         },
         project_id=body.project_id, identity=None,
     )
+
+
+# --- M28: image -> motion --------------------------------------------------
+
+
+class AnimateRequest(BaseModel):
+    """Animate a still from the library — the cheap-b-roll path: generate
+    once as an image, bring it to life only when a video is worth the lane
+    time (or the API dollars)."""
+
+    asset_id: uuid.UUID
+    prompt: str | None = None
+    provider: str = DEFAULT_PROVIDER
+    model: str = "wan2.2-i2v"
+    duration_s: int = Field(default=5, ge=1, le=15)
+    project_id: uuid.UUID | None = None
+
+
+class TalkRequest(BaseModel):
+    """Talking / singing photo. Face-bearing generation — a consented
+    Identity is REQUIRED (C6), not optional. Provide a script (spoken via
+    the identity's voice profile) OR an audio asset (a song vocal makes it
+    a singing photo)."""
+
+    asset_id: uuid.UUID
+    identity_id: uuid.UUID
+    script: str | None = Field(default=None, max_length=2000)
+    audio_asset_id: uuid.UUID | None = None
+    voice_profile_id: uuid.UUID | None = None
+    provider: str = DEFAULT_PROVIDER
+    model: str = "musetalk-image"
+    project_id: uuid.UUID | None = None
+
+
+def _image_asset_or_422(session: Session, asset_id: uuid.UUID):
+    from schema.models import Asset
+
+    asset = session.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="asset not found")
+    if asset.uri.rsplit(".", 1)[-1].lower() not in ("png", "jpg", "jpeg", "webp"):
+        raise HTTPException(status_code=422, detail="asset is not an image")
+    return asset
+
+
+@router.post("/animate", response_model=GenerationRead, status_code=201)
+async def animate_image(
+    body: AnimateRequest,
+    session: Session = Depends(get_session),
+    registry: ProviderRegistry = Depends(get_registry),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+):
+    asset = _image_asset_or_422(session, body.asset_id)
+    try:
+        registry.resolve(body.provider, body.model, GenerationKind.image_to_video)
+    except UnknownModelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _checked_project(session, body.project_id)
+
+    generation = Generation(
+        provider=body.provider,
+        model=body.model,
+        kind=GenerationKind.image_to_video,
+        prompt=body.prompt or (asset.caption or "bring this image to life, subtle natural motion"),
+        params={
+            "source_asset_uri": asset.uri,
+            "duration_s": body.duration_s,
+        },
+        project_id=body.project_id,
+        source_asset_id=asset.id,
+    )
+    session.add(generation)
+    session.commit()
+    session.refresh(generation)
+    enqueue_generation(dispatcher, generation, registry)
+    return generation
+
+
+@router.post("/talk", response_model=GenerationRead, status_code=201)
+async def talk_image(
+    body: TalkRequest,
+    session: Session = Depends(get_session),
+    registry: ProviderRegistry = Depends(get_registry),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+):
+    from schema.models import Asset, VoiceProfile
+
+    asset = _image_asset_or_422(session, body.asset_id)
+    if bool(body.script) == bool(body.audio_asset_id):
+        raise HTTPException(
+            status_code=422,
+            detail="provide exactly one of script (talking) or audio_asset_id (singing)",
+        )
+    try:
+        registry.resolve(body.provider, body.model, GenerationKind.talking_image)
+    except UnknownModelError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _checked_project(session, body.project_id)
+
+    # C6: talking photos are face-bearing by definition — consent is not
+    # optional here, unlike stills where an identity merely styles the output.
+    identity = _gated_identity(session, body.identity_id)
+    assert identity is not None  # identity_id is required by the schema
+
+    params: dict = {"source_asset_uri": asset.uri}
+    if body.script:
+        params["script"] = body.script
+        if body.voice_profile_id is not None:
+            if session.get(VoiceProfile, body.voice_profile_id) is None:
+                raise HTTPException(status_code=404, detail="voice profile not found")
+            params["voice_profile_id"] = str(body.voice_profile_id)
+    else:
+        audio = session.get(Asset, body.audio_asset_id)
+        if audio is None:
+            raise HTTPException(status_code=404, detail="audio asset not found")
+        params["audio_asset_uri"] = audio.uri
+
+    generation = Generation(
+        provider=body.provider,
+        model=body.model,
+        kind=GenerationKind.talking_image,
+        prompt=body.script or f"singing photo of {asset.caption or 'the subject'}",
+        params=params,
+        project_id=body.project_id,
+        identity_id=identity.id,
+        source_asset_id=asset.id,
+    )
+    session.add(generation)
+    session.commit()
+    session.refresh(generation)
+    enqueue_generation(dispatcher, generation, registry)
+    return generation

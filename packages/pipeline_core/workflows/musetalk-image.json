@@ -1,0 +1,49 @@
+{
+  "output": {
+    "node": "90",
+    "kind": "video"
+  },
+  "defaults": {
+    "fps": 25
+  },
+  "inputs": {
+    "source_image": ["10", "inputs", "image"],
+    "source_audio": ["20", "inputs", "audio"],
+    "seed": ["50", "inputs", "seed"]
+  },
+  "required": ["source_image"],
+  "graph": {
+    "10": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": ""
+      }
+    },
+    "20": {
+      "class_type": "LoadAudio",
+      "inputs": {
+        "audio": ""
+      }
+    },
+    "50": {
+      "class_type": "MuseTalkRun",
+      "inputs": {
+        "image": ["10", 0],
+        "audio": ["20", 0],
+        "seed": 0,
+        "fps": 25,
+        "bbox_shift": 0
+      }
+    },
+    "90": {
+      "class_type": "VHS_VideoCombine",
+      "inputs": {
+        "images": ["50", 0],
+        "audio": ["20", 0],
+        "frame_rate": 25,
+        "format": "video/h264-mp4",
+        "filename_prefix": "studio-talk"
+      }
+    }
+  }
+}

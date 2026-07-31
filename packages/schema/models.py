@@ -53,6 +53,8 @@ class GenerationKind(str, Enum):
     image = "image"
     upscale = "upscale"
     music = "music"  # ACE-Step music beds (M18)
+    talking_image = "talking_image"  # still + voice/song -> talking/singing photo (M28)
+    voice = "voice"  # standalone Chatterbox voiceover lines (M28)
 
 
 class GenerationStatus(str, Enum):

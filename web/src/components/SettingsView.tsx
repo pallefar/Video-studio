@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { poll } from "../lib";
 
 interface ConfigStatus {
+  comfy_online: boolean;
   dev_engines: boolean;
   comfy_configured: boolean;
   fal_configured: boolean;
@@ -18,7 +19,6 @@ interface Health {
 }
 
 const CONFIG_ROWS: [key: keyof ConfigStatus, label: string, hint: string][] = [
-  ["comfy_configured", "ComfyUI (local generation)", "set COMFY_URL — docs/workstation.md"],
   ["fal_configured", "fal.ai (API generation)", "set FAL_API_KEY in .env"],
   ["pexels_configured", "Pexels stock", "set PEXELS_API_KEY in .env"],
   ["pixabay_configured", "Pixabay stock", "set PIXABAY_API_KEY in .env"],
@@ -66,6 +66,29 @@ export default function SettingsView() {
         <div className="overflow-hidden rounded-2xl border border-edge bg-surface">
           <table className="w-full text-left text-sm">
             <tbody className="divide-y divide-edge-soft">
+              <tr>
+                <td className="px-4 py-3">ComfyUI (local generation)</td>
+                <td className="px-4 py-3">
+                  {config ? (
+                    config.comfy_online ? (
+                      <span className="chip-emerald rounded px-2 py-0.5 text-xs">online</span>
+                    ) : config.comfy_configured ? (
+                      <span className="chip-amber rounded px-2 py-0.5 text-xs">configured · offline</span>
+                    ) : (
+                      <span className="chip-neutral rounded px-2 py-0.5 text-xs">not set</span>
+                    )
+                  ) : (
+                    "…"
+                  )}
+                </td>
+                <td className="px-4 py-3 text-xs text-ink-faint">
+                  {config && !config.comfy_configured
+                    ? "./scripts/install_comfyui.sh, then set COMFY_URL"
+                    : config && !config.comfy_online
+                      ? "configured but unreachable — is ComfyUI running?"
+                      : ""}
+                </td>
+              </tr>
               {CONFIG_ROWS.map(([key, label, hint]) => (
                 <tr key={key}>
                   <td className="px-4 py-3">{label}</td>

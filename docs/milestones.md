@@ -293,3 +293,13 @@ alone for social posting.
 - [x] Prompts tab (searchable catalog, category chips, copy/save, source links, My prompts) + MCP tools (`prompt_catalog`, `reverse_prompt`, `save_prompt`, `list_saved_prompts`)
 
 **Accept:** `pytest tests/test_prompts.py` — registry audit incl. attribution, CRUD round-trip, reverse-prompt paths incl. the placeholder-caption refusal, enhancer frame cases, MCP exposure ✅ (2026-07-31)
+
+## M28 — Leonardo-class image studio, image→motion, audio suite UI
+
+- [x] **Image studio v2** (Leonardo-style): settings rail (engine picker with price/notes, style gallery, aspect presets, frames/seed/identity) + prompt bar + a real generation gallery with image previews and per-image actions — Animate, Talk, Upscale, → Prompt, Download
+- [x] **Image animation — the cheap-b-roll path**: `POST /images/animate` turns any library still into an i2v generation (wan2.2-i2v default, provenance via `source_asset_id`); the dev executor animates the actual still (slow push-in) so the flow is honest end-to-end without a GPU
+- [x] **Talking & singing photos**: new `talking_image` kind on `musetalk-image` (MIT, render lane) — `POST /images/talk` takes a script (talking, optional voice profile) XOR an audio asset (singing); **C6 is not optional here**: a consented identity is required, asserted by tests; dev executor muxes still + speech-shaped audio into a real A/V clip
+- [x] **Audio tab + voiceovers**: new `voice` kind on `chatterbox` (MIT, render lane), `POST /music/voice`; Audio section with ACE-Step music generation (catalog tag chips), voiceover form, and a play-in-place feed; ComfyUI template skeletons for both new kinds (`musetalk-image.json`, `chatterbox.json`) pass the structural audit
+- [x] **ComfyUI installed and connected**: `scripts/install_comfyui.sh` (clone + venv + torch + requirements); `/config` gains `comfy_online` (live `/system_stats` ping, never just "configured"); Settings shows online / configured·offline / not set; the studio's client proven against a real ComfyUI — submit → poll → collect round-trip returning genuine bytes
+
+**Accept:** `pytest tests/test_media_kinds.py` — animate/talk/voice routing incl. the C6-required and XOR negatives, dev A/V muxing probed with ffmpeg, comfy_online both ways ✅ (2026-07-31; full chain verified live in-browser: generate image → Animate → i2v asset, music + voiceover succeeded, Settings showing ComfyUI online)
