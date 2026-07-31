@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "mediabunny": "^1.52.1",
@@ -21,6 +22,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.5.3",
-    "vite": "^5.3.4"
+    "vite": "^5.3.4",
+    "vitest": "^4.1.10"
   }
 }

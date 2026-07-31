@@ -8,6 +8,19 @@ import type {
   TimelineDocument,
 } from "../types/schema";
 import { FrameSource } from "../lib/frameSource";
+import {
+  clipLen,
+  fmtTime,
+  inMs,
+  marqueeHits,
+  nextNeighbourStart,
+  parseSpriteVtt,
+  pasteBase,
+  prevNeighbourEnd,
+  resolveStart,
+  rippleShift,
+  type SpriteCue,
+} from "../lib/timelineOps";
 import { useToast } from "../lib/toast";
 import { Bars } from "./charts";
 
@@ -40,51 +53,12 @@ type Drag =
     })
   | null;
 
-interface SpriteCue {
-  start_ms: number;
-  end_ms: number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
 // Per-asset editor derivatives (M14 ingest fan-out): scrub sprite + cues,
 // waveform peaks.
 interface Extras {
   sprite?: string;
   cues?: SpriteCue[];
   peaks?: number[];
-}
-
-const inMs = (c: TimelineClip | AudioClip) => c.in_ms ?? 0;
-const clipLen = (c: TimelineClip | AudioClip) => c.out_ms - inMs(c);
-
-function vttTimeMs(stamp: string): number {
-  const [rest, frac = "0"] = stamp.trim().split(".");
-  const parts = rest.split(":").map(Number);
-  while (parts.length < 3) parts.unshift(0);
-  return ((parts[0] * 60 + parts[1]) * 60 + parts[2]) * 1000 + Number(frac.padEnd(3, "0"));
-}
-
-export function parseSpriteVtt(text: string): SpriteCue[] {
-  const cues: SpriteCue[] = [];
-  const lines = text.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].includes("-->")) continue;
-    const [from, to] = lines[i].split("-->");
-    const match = lines[i + 1]?.match(/#xywh=(\d+),(\d+),(\d+),(\d+)/);
-    if (!match) continue;
-    cues.push({
-      start_ms: vttTimeMs(from),
-      end_ms: vttTimeMs(to),
-      x: Number(match[1]),
-      y: Number(match[2]),
-      w: Number(match[3]),
-      h: Number(match[4]),
-    });
-  }
-  return cues;
 }
 
 const isTyping = (target: EventTarget | null) =>
@@ -278,53 +252,6 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     return Math.max(0, Math.round(ms));
   };
 
-  // OpenCut's placement rule, merged in: a drag can never create an overlap
-  // (previously overlaps were only rejected at save time as a 422).
-  const spanFree = (
-    lane: (TimelineClip | AudioClip)[], start: number, len: number, excludeId: string,
-  ) =>
-    !lane.some(
-      (c) => c.id !== excludeId && start < c.start_ms + clipLen(c) && start + len > c.start_ms,
-    );
-
-  const resolveStart = (
-    lane: (TimelineClip | AudioClip)[], proposed: number, len: number, excludeId: string,
-  ): number | null => {
-    const target = Math.max(0, proposed);
-    if (spanFree(lane, target, len, excludeId)) return target;
-    let best: number | null = null;
-    for (const c of lane) {
-      if (c.id === excludeId) continue;
-      for (const candidate of [c.start_ms - len, c.start_ms + clipLen(c)]) {
-        if (candidate < 0 || !spanFree(lane, candidate, len, excludeId)) continue;
-        if (best === null || Math.abs(candidate - target) < Math.abs(best - target)) {
-          best = candidate;
-        }
-      }
-    }
-    return best;
-  };
-
-  const nextNeighbourStart = (
-    lane: (TimelineClip | AudioClip)[], after: number, excludeId: string,
-  ) =>
-    lane.reduce(
-      (min, c) =>
-        c.id !== excludeId && c.start_ms >= after ? Math.min(min, c.start_ms) : min,
-      Infinity,
-    );
-
-  const prevNeighbourEnd = (
-    lane: (TimelineClip | AudioClip)[], before: number, excludeId: string,
-  ) =>
-    lane.reduce(
-      (max, c) =>
-        c.id !== excludeId && c.start_ms + clipLen(c) <= before
-          ? Math.max(max, c.start_ms + clipLen(c))
-          : max,
-      0,
-    );
-
   const onPointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     if (!drag || !doc) return;
@@ -486,21 +413,15 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       }
       d.texts = (d.texts ?? []).filter((t) => !removing(t.id));
       if (!ripple) return;
-      for (const span of removedSpans.sort((a, b) => b.start - a.start)) {
-        for (const c of [
+      rippleShift(
+        removedSpans,
+        [
           ...d.video_tracks![0],
           ...(d.video_tracks!.length > 1 ? d.video_tracks![1] : []),
           ...(d.audio_tracks?.[0] ?? []),
-        ]) {
-          if (c.start_ms >= span.start) c.start_ms -= span.len;
-        }
-        for (const t of d.texts ?? []) {
-          if (t.start_ms >= span.start) {
-            t.start_ms -= span.len;
-            t.end_ms -= span.len;
-          }
-        }
-      }
+        ],
+        d.texts ?? [],
+      );
     });
 
   const duplicateSelected = () =>
@@ -618,31 +539,15 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const pasteClipboard = () => {
     const clip = clipboardRef.current;
     if (!clip) return;
-    // OpenCut pastes at the playhead; our lanes have a no-overlap rule.
-    // Merged: paste at the playhead when the whole run fits there, else
-    // append at the lane end.
-    const pasteBase = (
-      lane: (TimelineClip | AudioClip)[], items: (TimelineClip | AudioClip)[],
-    ) => {
-      let cursor = playhead;
-      const fits = items.every((c) => {
-        const free = spanFree(lane, cursor, clipLen(c), "");
-        cursor += clipLen(c);
-        return free;
-      });
-      return fits
-        ? playhead
-        : lane.reduce((e, c) => Math.max(e, c.start_ms + clipLen(c)), 0);
-    };
     mutate((d) => {
-      let end = pasteBase(d.video_tracks![0], clip.video);
+      let end = pasteBase(d.video_tracks![0], clip.video, playhead);
       for (const c of clip.video) {
         d.video_tracks![0].push({ ...c, id: crypto.randomUUID(), start_ms: end });
         end += clipLen(c);
       }
       if (clip.overlay?.length) {
         if (d.video_tracks!.length < 2) d.video_tracks!.push([]);
-        let ovEnd = pasteBase(d.video_tracks![1], clip.overlay);
+        let ovEnd = pasteBase(d.video_tracks![1], clip.overlay, playhead);
         for (const c of clip.overlay) {
           d.video_tracks![1].push({ ...c, id: crypto.randomUUID(), start_ms: ovEnd });
           ovEnd += clipLen(c);
@@ -650,7 +555,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
       }
       if (clip.audio.length) {
         if (!d.audio_tracks || d.audio_tracks.length === 0) d.audio_tracks = [[]];
-        let audioEnd = pasteBase(d.audio_tracks[0], clip.audio);
+        let audioEnd = pasteBase(d.audio_tracks[0], clip.audio, playhead);
         for (const c of clip.audio) {
           d.audio_tracks[0].push({ ...c, id: crypto.randomUUID(), start_ms: audioEnd });
           audioEnd += clipLen(c);
@@ -949,12 +854,6 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const selectedIsOverlay = overlayTrack.some((c) => c.id === soleSelected);
   const canvasW = isShort ? (layout === "studio" ? 270 : 180) : layout === "studio" ? 640 : 320;
   const canvasH = isShort ? (layout === "studio" ? 480 : 320) : layout === "studio" ? 360 : 180;
-
-  const fmtTime = (ms: number) => {
-    const m = Math.floor(ms / 60000);
-    const s = (ms % 60000) / 1000;
-    return `${m}:${s.toFixed(1).padStart(4, "0")}`;
-  };
 
   const timeField = (
     label: string,
@@ -1337,24 +1236,21 @@ export default function EditorView({ openId }: { openId?: string | null }) {
             top: Math.min(marquee.y0, marquee.y1),
             bottom: Math.max(marquee.y0, marquee.y1),
           };
-          const bands: [items: { id: string; start_ms: number }[], top: number, len: (i: any) => number][] = [
-            [track, 4, (c) => clipLen(c)],
-            [overlayTrack, LANE_H + 12, (c) => clipLen(c)],
-            [audio, (LANE_H + 8) * 2 + 4, (c) => clipLen(c)],
-            [texts.map((t) => ({ id: t.id, start_ms: t.start_ms, end_ms: t.end_ms })),
-             (LANE_H + 8) * 3 + 4, (t) => t.end_ms - t.start_ms],
-          ];
-          const hit: string[] = [];
-          for (const [items, top, len] of bands) {
-            for (const item of items) {
-              const left = item.start_ms * pxPerMs;
-              const right = left + len(item as never) * pxPerMs;
-              if (left < box.right && right > box.left &&
-                  top < box.bottom && top + LANE_H - 8 > box.top) {
-                hit.push(item.id);
-              }
-            }
-          }
+          const hit = marqueeHits(
+            box,
+            [
+              { items: track, top: 4, lengthOf: (c) => clipLen(c as never) },
+              { items: overlayTrack, top: LANE_H + 12, lengthOf: (c) => clipLen(c as never) },
+              { items: audio, top: (LANE_H + 8) * 2 + 4, lengthOf: (c) => clipLen(c as never) },
+              {
+                items: texts,
+                top: (LANE_H + 8) * 3 + 4,
+                lengthOf: (t) => (t as unknown as TextClip).end_ms - (t as unknown as TextClip).start_ms,
+              },
+            ],
+            pxPerMs,
+            LANE_H - 8,
+          );
           setSelectedIds((ids) =>
             e.shiftKey ? [...new Set([...ids, ...hit])] : hit,
           );
