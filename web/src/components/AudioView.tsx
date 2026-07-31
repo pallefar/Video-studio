@@ -9,6 +9,17 @@ interface PromptEntry {
   template: string;
 }
 
+interface CatalogEntry {
+  provider: string;
+  model: string;
+  kinds: string[];
+  notes: string;
+  est_cost: number | null;
+}
+
+const engineLabel = (e: CatalogEntry) =>
+  `${e.provider}/${e.model}${e.est_cost ? ` · ~$${e.est_cost.toFixed(2)}` : e.est_cost === 0 ? " · free" : ""}`;
+
 const STATUS_STYLES: Record<string, string> = {
   queued: "chip-neutral",
   running: "chip-amber",
@@ -24,6 +35,10 @@ export default function AudioView({ projectId }: { projectId?: string }) {
   const [voiceText, setVoiceText] = useState("");
   const [voiceId, setVoiceId] = useState("");
   const [voices, setVoices] = useState<VoiceProfileRead[]>([]);
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
+  const [musicEngine, setMusicEngine] = useState("local/ace-step");
+  const [voiceEngine, setVoiceEngine] = useState("local/chatterbox");
+  const [elevenVoiceId, setElevenVoiceId] = useState("");
   const [tags, setTags] = useState<PromptEntry[]>([]);
   const [feed, setFeed] = useState<GenerationRead[]>([]);
   const [playing, setPlaying] = useState<{ id: string; url: string } | null>(null);
@@ -31,6 +46,12 @@ export default function AudioView({ projectId }: { projectId?: string }) {
 
   useEffect(() => {
     fetch("/voices").then((r) => r.json()).then(setVoices).catch(() => undefined);
+    fetch("/generations/catalog")
+      .then((r) => r.json())
+      .then((entries: CatalogEntry[]) =>
+        setCatalog(entries.filter((e) => e.kinds.includes("music") || e.kinds.includes("voice"))),
+      )
+      .catch(() => undefined);
     fetch("/prompts/catalog?category=music")
       .then((r) => r.json())
       .then((body) => setTags(body.entries))
@@ -63,18 +84,36 @@ export default function AudioView({ projectId }: { projectId?: string }) {
       .finally(() => setBusy(false));
   };
 
+  const musicEngines = catalog.filter((e) => e.kinds.includes("music"));
+  const voiceEngines = catalog.filter((e) => e.kinds.includes("voice"));
+  const [musicProvider, musicModel] = musicEngine.split("/", 2);
+  const [voiceProvider, voiceModel] = voiceEngine.split("/", 2);
+
   const generateMusic = () =>
     post(
       "/music/generate",
-      { prompt: musicPrompt, duration_s: duration, project_id: projectId ?? null },
-      "Music bed queued (ACE-Step, licence-clean)",
+      {
+        prompt: musicPrompt,
+        duration_s: duration,
+        provider: musicProvider,
+        model: musicModel,
+        project_id: projectId ?? null,
+      },
+      musicModel === "eleven-sfx" ? "Sound effect queued (ElevenLabs)" : "Music bed queued",
     );
 
   const generateVoice = () =>
     post(
       "/music/voice",
-      { text: voiceText, voice_profile_id: voiceId || null, project_id: projectId ?? null },
-      "Voiceover queued (Chatterbox)",
+      {
+        text: voiceText,
+        voice_profile_id: voiceProvider === "local" ? voiceId || null : null,
+        voice_id: voiceProvider === "elevenlabs" ? elevenVoiceId || null : null,
+        provider: voiceProvider,
+        model: voiceModel,
+        project_id: projectId ?? null,
+      },
+      voiceProvider === "elevenlabs" ? "Voiceover queued (ElevenLabs)" : "Voiceover queued (Chatterbox)",
     );
 
   const play = (generation: GenerationRead) => {
@@ -93,10 +132,11 @@ export default function AudioView({ projectId }: { projectId?: string }) {
     <div className="grid gap-6 lg:grid-cols-2">
       <section className="space-y-6">
         <div className="rounded-2xl border border-edge bg-surface p-5">
-          <h2 className="mb-1 text-lg font-semibold tracking-tight">Music bed</h2>
+          <h2 className="mb-1 text-lg font-semibold tracking-tight">Music &amp; SFX</h2>
           <p className="mb-3 text-sm text-ink-muted">
-            ACE-Step (Apache 2.0) — comma-separated tags work best. Lands as a
-            licence-clean library asset, ready for the editor's bed lane.
+            ACE-Step locally (Apache 2.0) or ElevenLabs via API — comma-separated
+            tags work best for music. Lands as a library asset with its licence
+            recorded, ready for the editor's bed lane.
           </p>
           <div className="mb-2 flex flex-wrap gap-1.5">
             {tags.map((t) => (
@@ -117,7 +157,18 @@ export default function AudioView({ projectId }: { projectId?: string }) {
             placeholder="lo-fi hip hop, mellow, vinyl crackle, 70 bpm, instrumental"
             className="mb-3 w-full rounded-lg border border-edge bg-field px-3 py-2 text-sm text-ink outline-none focus:border-lime-300/60"
           />
-          <div className="flex items-end gap-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex flex-col gap-1 text-xs text-ink-muted">
+              Engine
+              <select value={musicEngine} onChange={(e) => setMusicEngine(e.target.value)}
+                className="rounded-lg border border-edge bg-field px-2 py-1.5 text-sm text-ink">
+                {musicEngines.map((e) => (
+                  <option key={`${e.provider}/${e.model}`} value={`${e.provider}/${e.model}`}>
+                    {engineLabel(e)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="flex flex-col gap-1 text-xs text-ink-muted">
               Duration · {duration}s
               <input type="range" min={10} max={300} step={10} value={duration}
@@ -128,7 +179,7 @@ export default function AudioView({ projectId }: { projectId?: string }) {
               disabled={busy || musicPrompt.trim().length < 2}
               className="rounded-lg bg-lime-300 px-5 py-2 text-sm font-semibold text-black hover:bg-lime-200 disabled:opacity-40"
             >
-              Generate music
+              {musicModel === "eleven-sfx" ? "Generate SFX" : "Generate music"}
             </button>
           </div>
         </div>
@@ -136,8 +187,9 @@ export default function AudioView({ projectId }: { projectId?: string }) {
         <div className="rounded-2xl border border-edge bg-surface p-5">
           <h2 className="mb-1 text-lg font-semibold tracking-tight">Voiceover</h2>
           <p className="mb-3 text-sm text-ink-muted">
-            Chatterbox (MIT) speaks a line as a standalone audio asset — for the
-            editor, or as the voice of a talking photo.
+            Chatterbox locally (MIT) or ElevenLabs via API — a spoken line as a
+            standalone audio asset, for the editor or as the voice of a talking
+            photo.
           </p>
           <textarea
             value={voiceText}
@@ -146,17 +198,40 @@ export default function AudioView({ projectId }: { projectId?: string }) {
             placeholder="Welcome back — today we're looking at why your backlog is lying to you."
             className="mb-3 w-full rounded-lg border border-edge bg-field px-3 py-2 text-sm text-ink outline-none focus:border-lime-300/60"
           />
-          <div className="flex items-end gap-4">
+          <div className="flex flex-wrap items-end gap-4">
             <label className="flex flex-col gap-1 text-xs text-ink-muted">
-              Voice
-              <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}
+              Engine
+              <select value={voiceEngine} onChange={(e) => setVoiceEngine(e.target.value)}
                 className="rounded-lg border border-edge bg-field px-2 py-1.5 text-sm text-ink">
-                <option value="">default</option>
-                {voices.map((v) => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
+                {voiceEngines.map((e) => (
+                  <option key={`${e.provider}/${e.model}`} value={`${e.provider}/${e.model}`}>
+                    {engineLabel(e)}
+                  </option>
                 ))}
               </select>
             </label>
+            {voiceProvider === "local" ? (
+              <label className="flex flex-col gap-1 text-xs text-ink-muted">
+                Voice
+                <select value={voiceId} onChange={(e) => setVoiceId(e.target.value)}
+                  className="rounded-lg border border-edge bg-field px-2 py-1.5 text-sm text-ink">
+                  <option value="">default</option>
+                  {voices.map((v) => (
+                    <option key={v.id} value={v.id}>{v.name}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <label className="flex flex-col gap-1 text-xs text-ink-muted">
+                ElevenLabs voice id
+                <input
+                  value={elevenVoiceId}
+                  onChange={(e) => setElevenVoiceId(e.target.value)}
+                  placeholder="default (Rachel)"
+                  className="w-44 rounded-lg border border-edge bg-field px-2 py-1.5 text-sm text-ink"
+                />
+              </label>
+            )}
             <button
               onClick={generateVoice}
               disabled={busy || voiceText.trim().length < 2}

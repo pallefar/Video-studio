@@ -303,3 +303,13 @@ alone for social posting.
 - [x] **ComfyUI installed and connected**: `scripts/install_comfyui.sh` (clone + venv + torch + requirements); `/config` gains `comfy_online` (live `/system_stats` ping, never just "configured"); Settings shows online / configured·offline / not set; the studio's client proven against a real ComfyUI — submit → poll → collect round-trip returning genuine bytes
 
 **Accept:** `pytest tests/test_media_kinds.py` — animate/talk/voice routing incl. the C6-required and XOR negatives, dev A/V muxing probed with ffmpeg, comfy_online both ways ✅ (2026-07-31; full chain verified live in-browser: generate image → Animate → i2v asset, music + voiceover succeeded, Settings showing ComfyUI online)
+
+## M29 — ComfyUI plugin installer + ElevenLabs provider
+
+- [x] Node-pack manifest as data (`pipeline_core/comfy_nodes.py`): repo, licence, provided node types, dependent templates — GPL packs recorded under the sidecar exception (roadmap §6); `install_comfyui.sh` clones the exact manifest list (drift-guarded by `tests/test_comfy.py`) and exports the studio's workflow templates into ComfyUI's own UI (`user/default/workflows/studio-*.json`)
+- [x] Live node-pack check: `ComfyUIClient.object_info()` + `GET /config/comfy` diff the templates against the running ComfyUI; Settings shows per-pack installed/missing chips with the repo to install — verified against a real ComfyUI (5/6 packs importable on the CPU container; MuseTalk's mmlab stack is the documented GPU-host install, docs/workstation.md §1)
+- [x] Chatterbox template aligned with the real installed pack (`FL_ChatterboxTTS`, schema verified via `/object_info`)
+- [x] ElevenLabs API provider (`eleven-tts`/`eleven-sfx`/`eleven-music`): key from env only, unconfigured → not registered; CLASS_API → network jobs on the cpu lane, never the GPU lock; per-plan commercial licence recorded on every generated asset; SFX duration clamped to the API cap
+- [x] Audio tab engine pickers (local vs ElevenLabs with price), ElevenLabs voice-id field; Settings ElevenLabs row; `.env.example` + Settings drift guard holds
+
+**Accept:** `pytest tests/test_comfy.py tests/test_providers.py` — manifest audit, install-script drift guard, `/config/comfy` missing-pack detection, ElevenLabs adapter (headers/clamps/costs) and cpu-lane routing ✅ (2026-07-31; node packs installed into the live ComfyUI, Settings verified in-browser)

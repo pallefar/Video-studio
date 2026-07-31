@@ -11,12 +11,13 @@
   "required": ["prompt"],
   "graph": {
     "10": {
-      "class_type": "ChatterboxTTS",
+      "class_type": "FL_ChatterboxTTS",
       "inputs": {
         "text": "",
         "seed": 0,
         "exaggeration": 0.5,
-        "cfg_weight": 0.5
+        "cfg_weight": 0.5,
+        "temperature": 0.8
       }
     },
     "40": {

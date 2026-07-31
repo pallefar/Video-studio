@@ -156,6 +156,13 @@ class ComfyUIClient:
                 )
             time.sleep(self._poll_interval_s)
 
+    def object_info(self) -> set[str]:
+        """Node class types the running ComfyUI knows — core + custom packs.
+        The diff against our templates powers the Settings node-pack check."""
+        response = self._client.get(f"{self._base}/object_info")
+        response.raise_for_status()
+        return set(response.json().keys())
+
     def download(self, filename: str, subfolder: str = "", type_: str = "output") -> bytes:
         response = self._client.get(
             f"{self._base}/view",

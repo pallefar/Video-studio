@@ -24,6 +24,13 @@ DEFAULT_MODEL = "ace-step"
 # Recorded on the generated asset: ACE-Step is Apache 2.0, outputs clean for
 # commercial use (roadmap-v2 §6).
 ASSET_LICENSE = "Generated (ACE-Step, Apache 2.0)"
+# ElevenLabs outputs: commercial use is granted by the paid plan's ToS —
+# recorded per the roadmap §3 rule so the asset carries its true provenance.
+ELEVENLABS_LICENSE = "Generated (ElevenLabs API, paid-plan commercial licence)"
+
+
+def _license_for(provider: str, local_license: str) -> str:
+    return ELEVENLABS_LICENSE if provider == "elevenlabs" else local_license
 
 
 class MusicGenerateRequest(BaseModel):
@@ -56,7 +63,7 @@ async def generate_music(
         params={
             "duration_s": body.duration_s,
             "purpose": "music_bed",
-            "asset_license": ASSET_LICENSE,
+            "asset_license": _license_for(body.provider, ASSET_LICENSE),
         },
         project_id=body.project_id,
     )
@@ -76,6 +83,8 @@ DEFAULT_VOICE_MODEL = "chatterbox"
 class VoiceoverRequest(BaseModel):
     text: str = Field(min_length=2, max_length=2000)
     voice_profile_id: uuid.UUID | None = None
+    # ElevenLabs voice id (their voice library), used when provider=elevenlabs.
+    voice_id: str | None = Field(default=None, max_length=64)
     provider: str = DEFAULT_PROVIDER
     model: str = DEFAULT_VOICE_MODEL
     project_id: uuid.UUID | None = None
@@ -98,11 +107,16 @@ async def generate_voiceover(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.project_id is not None and session.get(Project, body.project_id) is None:
         raise HTTPException(status_code=404, detail="project not found")
-    params: dict = {"purpose": "voiceover", "asset_license": VOICE_LICENSE}
+    params: dict = {
+        "purpose": "voiceover",
+        "asset_license": _license_for(body.provider, VOICE_LICENSE),
+    }
     if body.voice_profile_id is not None:
         if session.get(VoiceProfile, body.voice_profile_id) is None:
             raise HTTPException(status_code=404, detail="voice profile not found")
         params["voice_profile_id"] = str(body.voice_profile_id)
+    if body.voice_id:
+        params["voice_id"] = body.voice_id
 
     generation = Generation(
         provider=body.provider,

@@ -36,6 +36,7 @@ async def config_status() -> dict[str, bool]:
         "dev_engines": bool(settings.dev_engines),
         "comfy_configured": bool(settings.comfy_url),
         "fal_configured": bool(settings.fal_api_key),
+        "elevenlabs_configured": bool(settings.elevenlabs_api_key),
         "pexels_configured": bool(settings.pexels_api_key),
         "pixabay_configured": bool(settings.pixabay_api_key),
         "youtube_configured": bool(
@@ -44,4 +45,31 @@ async def config_status() -> dict[str, bool]:
             and settings.youtube_refresh_token
         ),
         "qwen_configured": bool(settings.qwen_model_path),
+    }
+
+
+@router.get("/config/comfy")
+async def comfy_detail() -> dict:
+    """Node-pack view for the Settings tab: which custom-node packs the
+    workflow templates need are actually installed on the running ComfyUI.
+    Node class names and pack names only — no secrets live here."""
+    settings = Settings()
+    if not settings.comfy_url:
+        return {"configured": False, "online": False, "packs": [], "missing": []}
+
+    from pipeline_core.comfy import ComfyUIClient
+    from pipeline_core.comfy_nodes import missing_node_types, pack_status
+
+    try:
+        import httpx
+
+        client = ComfyUIClient(settings.comfy_url, client=httpx.Client(timeout=5))
+        available = client.object_info()
+    except Exception:
+        return {"configured": True, "online": False, "packs": [], "missing": []}
+    return {
+        "configured": True,
+        "online": True,
+        "packs": pack_status(available),
+        "missing": missing_node_types(available),
     }

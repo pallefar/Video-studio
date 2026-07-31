@@ -28,6 +28,10 @@ class Settings(BaseSettings):
 
     # Generation providers (M10): same rule — no key, not registered.
     fal_api_key: str = ""
+    # ElevenLabs direct API (roadmap-v2 §3): voice/SFX/music generation as
+    # network jobs. Configuring the key is the per-provider data-egress
+    # decision — prompts/scripts are sent to ElevenLabs when used.
+    elevenlabs_api_key: str = ""
 
     # YouTube publish (M6): OAuth refresh-token flow. Unconfigured -> the
     # publish stage waits instead of failing, like a missing ffmpeg.

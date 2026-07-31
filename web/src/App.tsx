@@ -56,7 +56,7 @@ const TITLES: Record<Tab, [string, string]> = {
   create: ["Create", "Preset-first video: pick a move, drop a subject, generate."],
   images: ["Image studio", "Styled stills, storyboard frames, thumbnails."],
   avatar: ["Avatar", "Script → voice → lip-sync → review → publish, always private."],
-  audio: ["Audio", "Music beds (ACE-Step) and voiceover lines (Chatterbox), licence-clean."],
+  audio: ["Audio", "Music, SFX and voiceovers — ACE-Step and Chatterbox locally, ElevenLabs via API."],
   prompts: ["Prompts", "Prompt engineering as a catalog — plus reverse prompts from any asset."],
   storyboards: ["Storyboards", "Plan shots, generate per beat, export a real render."],
   editor: ["Editor", "Multi-track timeline over proxies, server-side final render."],

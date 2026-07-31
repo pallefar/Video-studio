@@ -206,6 +206,88 @@ class FalProvider:
         )
 
 
+class ElevenLabsProvider:
+    """ElevenLabs direct API (roadmap-v2 §3 "direct APIs where it matters").
+
+    Voice beyond Chatterbox, plus sound effects and music. Synchronous HTTP —
+    the response body IS the audio — run as a network job on the cpu lane
+    like every API provider. ToS recorded at integration (roadmap §3 rule):
+    commercial use of generated audio requires a paid ElevenLabs plan; the
+    licence string on each generated asset says so, and the owner's
+    data-egress decision is configuring ELEVENLABS_API_KEY."""
+
+    name = "elevenlabs"
+    provider_class = CLASS_API
+
+    BASE = "https://api.elevenlabs.io"
+    # Default voice: "Rachel", ElevenLabs' stock premade voice. Override per
+    # request with params.voice_id.
+    DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+    DEFAULT_TTS_MODEL = "eleven_multilingual_v2"
+    SFX_MAX_S = 22.0  # API cap on /v1/sound-generation duration
+
+    # Flat per-generation cost estimates (data, revised over time); a billed
+    # amount from the API would win, but ElevenLabs bills by monthly credits.
+    ROSTER: list[tuple[str, frozenset[GenerationKind], float, str]] = [
+        ("eleven-tts", frozenset({GenerationKind.voice}), 0.15,
+         "TTS / voiceovers, 70+ languages"),
+        ("eleven-sfx", frozenset({GenerationKind.music}), 0.08,
+         f"sound effects, <= {int(SFX_MAX_S)} s"),
+        ("eleven-music", frozenset({GenerationKind.music}), 0.50,
+         "full music tracks (Eleven Music)"),
+    ]
+
+    def __init__(self, api_key: str, client: Optional[httpx.Client] = None):
+        self._client = client or httpx.Client(timeout=300)
+        self._headers = {"xi-api-key": api_key}
+
+    def models(self) -> list[ModelSpec]:
+        return [
+            ModelSpec(self.name, model, kinds, CLASS_API,
+                      notes=f"{notes} — paid-plan commercial licence", est_cost=cost)
+            for model, kinds, cost, notes in self.ROSTER
+        ]
+
+    def generate(self, generation: Generation) -> ProviderResult:
+        params = generation.params or {}
+        if generation.model == "eleven-tts":
+            voice_id = params.get("voice_id") or self.DEFAULT_VOICE_ID
+            response = self._client.post(
+                f"{self.BASE}/v1/text-to-speech/{voice_id}",
+                params={"output_format": "mp3_44100_128"},
+                json={
+                    "text": generation.prompt,
+                    "model_id": params.get("tts_model", self.DEFAULT_TTS_MODEL),
+                },
+                headers=self._headers,
+            )
+        elif generation.model == "eleven-sfx":
+            payload: dict = {"text": generation.prompt}
+            if params.get("duration_s"):
+                payload["duration_seconds"] = min(float(params["duration_s"]), self.SFX_MAX_S)
+            response = self._client.post(
+                f"{self.BASE}/v1/sound-generation", json=payload, headers=self._headers
+            )
+        elif generation.model == "eleven-music":
+            response = self._client.post(
+                f"{self.BASE}/v1/music",
+                json={
+                    "prompt": generation.prompt,
+                    "music_length_ms": int(float(params.get("duration_s", 60)) * 1000),
+                },
+                headers=self._headers,
+            )
+        else:
+            raise UnknownModelError(f"unknown elevenlabs model {generation.model!r}")
+        response.raise_for_status()
+        est = next((cost for model, _, cost, _ in self.ROSTER if model == generation.model), None)
+        return ProviderResult(
+            data=response.content,
+            content_type=response.headers.get("content-type", "audio/mpeg").split(";")[0],
+            cost=est,
+        )
+
+
 @dataclass
 class ProviderRegistry:
     providers: dict[str, GenerationProvider] = field(default_factory=dict)
@@ -234,4 +316,6 @@ def build_registry(settings: Optional[Settings] = None) -> ProviderRegistry:
     registry.register(LocalWanProvider())
     if settings.fal_api_key:
         registry.register(FalProvider(settings.fal_api_key))
+    if settings.elevenlabs_api_key:
+        registry.register(ElevenLabsProvider(settings.elevenlabs_api_key))
     return registry

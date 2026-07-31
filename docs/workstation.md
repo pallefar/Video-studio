@@ -16,28 +16,32 @@ first, always.
 
 ## 1. ComfyUI headless (the M10 executor)
 
-One-command install (clone + venv + torch + requirements, prints the
-wiring steps): `./scripts/install_comfyui.sh`. The Settings tab shows the
-live connection state — **online** when `/system_stats` answers, not just
-when `COMFY_URL` is set. The studio's client (`pipeline_core/comfy.py`)
-has been proven against a real ComfyUI end-to-end (submit → poll → fetch).
-
+One-command install: `./scripts/install_comfyui.sh` — clone + venv + torch
++ requirements, **plus every custom-node pack the workflow templates need**
+(manifest: `pipeline_core/comfy_nodes.py`, drift-guarded by
+`tests/test_comfy.py`), and it exports the studio's workflow templates into
+ComfyUI's own UI (`user/default/workflows/studio-*.json`) so graphs can be
+tuned hands-on. The Settings tab shows the live connection state —
+**online** when `/system_stats` answers, not just when `COMFY_URL` is set —
+and, when online, diffs the templates against `/object_info` to flag any
+node pack that still isn't importable, with its repo.
 
 ComfyUI is a service dependency exactly like MinIO: our worker submits an
 API-format node graph (`POST /prompt`), polls `/history/{prompt_id}`, and
-downloads outputs via `/view`. Install it in its **own venv**, run it
-headless, point the studio at it:
+downloads outputs via `/view`. It lives in its **own venv** and runs
+headless: `.venv/bin/python main.py --listen 127.0.0.1 --port 8188`.
 
-```bash
-git clone https://github.com/comfyanonymous/ComfyUI ~/comfyui && cd ~/comfyui
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
-# custom nodes (pinned by commit when you install them):
-#   ComfyUI-GGUF            — GGUF UNet loaders (UnetLoaderGGUF)
-#   ComfyUI-VideoHelperSuite — VHS_LoadVideo / VHS_VideoCombine
-#   ComfyUI-WanVideoWrapper  — Wan 2.x + Fun-Camera embeddings
-#   (VACE + ACE-Step nodes ship with current ComfyUI core)
-.venv/bin/python main.py --listen 127.0.0.1 --port 8188   # headless: no browser needed
-```
+Node packs the script installs (VACE + ACE-Step + WanCameraEmbedding ship
+with ComfyUI core):
+
+| Pack | Provides | Note |
+|---|---|---|
+| ComfyUI-VideoHelperSuite | `VHS_LoadVideo` / `VHS_VideoCombine` | every video template's output stage |
+| ComfyUI-GGUF | `UnetLoaderGGUF` | GGUF quantised checkpoints (sm_86, no FP8) |
+| ComfyUI-MuseTalk | `MuseTalkRun` | **needs the mmlab stack**: `.venv/bin/pip install -U openmim && .venv/bin/mim install mmengine mmcv mmdet mmpose` — a GPU-host install, it will not import on a CPU box |
+| ComfyUI_Fill-ChatterBox | `FL_ChatterboxTTS` / `FL_ChatterboxVC` | node names verified against the pack's `/object_info` |
+| ComfyUI-WanVideoWrapper | Wan 2.x advanced workflows | optional: Uni3C / ReCamMaster (M11) |
+| ComfyUI-KJNodes | helper nodes | optional, most community Wan workflows assume it |
 
 Studio side (`.env`):
 

@@ -65,6 +65,8 @@ class FakeComfy:
             }})
         if path == "/view":
             return httpx.Response(200, content=b"comfy-output-bytes")
+        if path == "/object_info":
+            return httpx.Response(200, json={"KSampler": {}, "CLIPTextEncode": {}})
         if path == "/upload/image":
             # crude multipart name extraction is enough for the fake
             name = request.content.split(b'filename="')[1].split(b'"')[0].decode()
@@ -271,3 +273,120 @@ def test_unconfigured_local_falls_back_to_declared_api_target(client, engine, di
     (queue, func, args), = recorder.calls
     assert queue == "cpu"  # the fal-class fake is a network job
     assert args == (generation_id,)
+
+
+# --- node-pack manifest (comfy_nodes.py) -------------------------------------
+
+
+def test_node_pack_manifest_is_audited():
+    """Registry-as-data audit: every pack carries repo/licence/probes, and
+    every template it claims to serve actually references one of its nodes."""
+    from pipeline_core.comfy_nodes import NODE_PACKS, template_node_types
+
+    templates = template_node_types()
+    for pack in NODE_PACKS:
+        assert pack.repo.startswith("https://github.com/"), pack.name
+        assert pack.license, pack.name
+        assert pack.provides, pack.name
+        for model in pack.needed_for:
+            assert model in templates, f"{pack.name} claims unknown template {model}"
+            assert templates[model] & set(pack.provides), (
+                f"{pack.name} claims {model} but the template uses none of its nodes"
+            )
+
+
+def test_every_custom_node_type_maps_to_a_pack():
+    """Every non-core node class our templates use must be attributable to a
+    manifest pack — otherwise the Settings check can't say what to install."""
+    from pipeline_core.comfy_nodes import pack_for_type, template_node_types
+
+    core_prefixes = ("VHS_", "MuseTalk", "FL_Chatterbox", "UnetLoaderGGUF")
+    for model, types in template_node_types().items():
+        for class_type in types:
+            if class_type.startswith(core_prefixes) or class_type == "UnetLoaderGGUF":
+                assert pack_for_type(class_type) is not None, (
+                    f"{model} uses custom node {class_type} with no manifest pack"
+                )
+
+
+def test_missing_node_types_diffs_templates_against_object_info():
+    from pipeline_core.comfy_nodes import missing_node_types, template_node_types
+
+    everything = set().union(*template_node_types().values())
+    assert missing_node_types(everything) == []
+
+    without_musetalk = everything - {"MuseTalkRun"}
+    missing = missing_node_types(without_musetalk)
+    assert len(missing) == 1
+    assert missing[0]["type"] == "MuseTalkRun"
+    assert missing[0]["pack"] == "ComfyUI-MuseTalk"
+    assert missing[0]["models"] == ["musetalk-image"]
+
+
+def test_pack_status_probes_installed_packs():
+    from pipeline_core.comfy_nodes import pack_status
+
+    status = {p["name"]: p for p in pack_status({"VHS_VideoCombine", "UnetLoaderGGUF"})}
+    assert status["ComfyUI-VideoHelperSuite"]["installed"] is True
+    assert status["ComfyUI-GGUF"]["installed"] is True
+    assert status["ComfyUI-MuseTalk"]["installed"] is False
+    assert status["ComfyUI-WanVideoWrapper"]["optional"] is True
+
+
+def test_install_script_clones_every_manifest_pack():
+    """Drift guard: scripts/install_comfyui.sh must clone the exact repos the
+    manifest declares — the two lists can never diverge silently."""
+    from pathlib import Path
+
+    from pipeline_core.comfy_nodes import NODE_PACKS
+
+    script = Path(__file__).parent.parent / "scripts" / "install_comfyui.sh"
+    text = script.read_text()
+    for pack in NODE_PACKS:
+        assert pack.repo in text, f"install_comfyui.sh is missing {pack.repo}"
+    # and it exports the studio's workflow templates into ComfyUI's UI
+    assert "user/default/workflows" in text
+
+
+def test_client_object_info_returns_node_types():
+    client = _client(FakeComfy())
+    assert client.object_info() == {"KSampler", "CLIPTextEncode"}
+
+
+# --- GET /config/comfy -------------------------------------------------------
+
+
+def test_config_comfy_unconfigured(client, monkeypatch):
+    monkeypatch.delenv("COMFY_URL", raising=False)
+    body = client.get("/config/comfy").json()
+    assert body == {"configured": False, "online": False, "packs": [], "missing": []}
+
+
+def test_config_comfy_reports_missing_packs(client, monkeypatch):
+    from pipeline_core.comfy_nodes import template_node_types
+
+    monkeypatch.setenv("COMFY_URL", "http://comfy-host:8188")
+    everything = set().union(*template_node_types().values())
+
+    class FakeInfoClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def object_info(self):
+            return everything - {"FL_ChatterboxTTS"}
+
+    monkeypatch.setattr("pipeline_core.comfy.ComfyUIClient", FakeInfoClient)
+    body = client.get("/config/comfy").json()
+    assert body["online"] is True
+    assert [m["type"] for m in body["missing"]] == ["FL_ChatterboxTTS"]
+    assert body["missing"][0]["pack"] == "ComfyUI_Fill-ChatterBox"
+    packs = {p["name"]: p["installed"] for p in body["packs"]}
+    assert packs["ComfyUI_Fill-ChatterBox"] is False
+    assert packs["ComfyUI-VideoHelperSuite"] is True
+
+
+def test_config_comfy_offline_degrades(client, monkeypatch):
+    monkeypatch.setenv("COMFY_URL", "http://127.0.0.1:1")
+    body = client.get("/config/comfy").json()
+    assert body["configured"] is True
+    assert body["online"] is False

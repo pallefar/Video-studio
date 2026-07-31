@@ -6,10 +6,18 @@ interface ConfigStatus {
   dev_engines: boolean;
   comfy_configured: boolean;
   fal_configured: boolean;
+  elevenlabs_configured: boolean;
   pexels_configured: boolean;
   pixabay_configured: boolean;
   youtube_configured: boolean;
   qwen_configured: boolean;
+}
+
+interface ComfyDetail {
+  configured: boolean;
+  online: boolean;
+  packs: { name: string; license: string; optional: boolean; installed: boolean }[];
+  missing: { type: string; models: string[]; pack: string | null; repo: string | null }[];
 }
 
 interface Health {
@@ -20,6 +28,7 @@ interface Health {
 
 const CONFIG_ROWS: [key: keyof ConfigStatus, label: string, hint: string][] = [
   ["fal_configured", "fal.ai (API generation)", "set FAL_API_KEY in .env"],
+  ["elevenlabs_configured", "ElevenLabs (voice / SFX / music)", "set ELEVENLABS_API_KEY in .env"],
   ["pexels_configured", "Pexels stock", "set PEXELS_API_KEY in .env"],
   ["pixabay_configured", "Pixabay stock", "set PIXABAY_API_KEY in .env"],
   ["youtube_configured", "YouTube publish", "set YOUTUBE_CLIENT_ID / SECRET / REFRESH_TOKEN"],
@@ -34,10 +43,19 @@ const LANE_LABELS: Record<string, string> = {
 
 export default function SettingsView() {
   const [config, setConfig] = useState<ConfigStatus | null>(null);
+  const [comfy, setComfy] = useState<ComfyDetail | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
 
   useEffect(() => {
-    fetch("/config").then((r) => r.json()).then(setConfig).catch(() => undefined);
+    fetch("/config")
+      .then((r) => r.json())
+      .then((c: ConfigStatus) => {
+        setConfig(c);
+        if (c.comfy_online) {
+          fetch("/config/comfy").then((r) => r.json()).then(setComfy).catch(() => undefined);
+        }
+      })
+      .catch(() => undefined);
   }, []);
 
   const refresh = useCallback(() => {
@@ -89,6 +107,40 @@ export default function SettingsView() {
                       : ""}
                 </td>
               </tr>
+              {comfy?.online && (
+                <tr>
+                  <td className="px-4 py-2 text-xs text-ink-muted">node packs</td>
+                  <td className="px-4 py-2" colSpan={2}>
+                    <div className="flex flex-wrap gap-1.5">
+                      {comfy.packs.map((pack) => (
+                        <span
+                          key={pack.name}
+                          title={pack.license}
+                          className={`rounded px-2 py-0.5 text-[11px] ${
+                            pack.installed
+                              ? "chip-emerald"
+                              : pack.optional
+                                ? "chip-neutral"
+                                : "chip-amber"
+                          }`}
+                        >
+                          {pack.name.replace(/^ComfyUI[-_]/, "")}
+                          {pack.installed ? "" : pack.optional ? " · optional" : " · missing"}
+                        </span>
+                      ))}
+                    </div>
+                    {comfy.missing.length > 0 && (
+                      <p className="mt-1.5 text-[11px] text-ink-faint">
+                        Missing node types:{" "}
+                        {comfy.missing
+                          .map((m) => `${m.type}${m.pack ? ` (${m.pack})` : ""}`)
+                          .join(", ")}{" "}
+                        — re-run ./scripts/install_comfyui.sh and restart ComfyUI.
+                      </p>
+                    )}
+                  </td>
+                </tr>
+              )}
               {CONFIG_ROWS.map(([key, label, hint]) => (
                 <tr key={key}>
                   <td className="px-4 py-3">{label}</td>
