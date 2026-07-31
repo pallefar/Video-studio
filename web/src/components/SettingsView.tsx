@@ -7,6 +7,8 @@ interface ConfigStatus {
   comfy_configured: boolean;
   fal_configured: boolean;
   elevenlabs_configured: boolean;
+  openai_configured: boolean;
+  gemini_configured: boolean;
   pexels_configured: boolean;
   pixabay_configured: boolean;
   youtube_configured: boolean;
@@ -29,6 +31,8 @@ interface Health {
 const CONFIG_ROWS: [key: keyof ConfigStatus, label: string, hint: string][] = [
   ["fal_configured", "fal.ai (API generation)", "set FAL_API_KEY in .env"],
   ["elevenlabs_configured", "ElevenLabs (voice / SFX / music)", "set ELEVENLABS_API_KEY in .env"],
+  ["openai_configured", "OpenAI Sora (video)", "set OPENAI_API_KEY in .env"],
+  ["gemini_configured", "Google Veo (video)", "set GEMINI_API_KEY in .env"],
   ["pexels_configured", "Pexels stock", "set PEXELS_API_KEY in .env"],
   ["pixabay_configured", "Pixabay stock", "set PIXABAY_API_KEY in .env"],
   ["youtube_configured", "YouTube publish", "set YOUTUBE_CLIENT_ID / SECRET / REFRESH_TOKEN"],

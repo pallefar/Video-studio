@@ -288,6 +288,163 @@ class ElevenLabsProvider:
         )
 
 
+class SoraProvider:
+    """OpenAI Sora, direct (roadmap-v2 §3): Higgsfield merchandises Sora as
+    the realism engine. Async video jobs — create, poll, then download the
+    MP4 — run as a network job on the cpu lane. Text-to-video first;
+    image-to-video (input_reference) can follow when needed."""
+
+    name = "sora"
+    provider_class = CLASS_API
+
+    BASE = "https://api.openai.com"
+    SECONDS = (4, 8, 12)  # the API's allowed clip lengths
+    # Flat per-generation estimates at the default 8 s (per-second pricing:
+    # sora-2 ~$0.10/s at 720p, sora-2-pro ~$0.30/s) — billed data wins when
+    # the API ever reports it.
+    ROSTER: list[tuple[str, float, str]] = [
+        ("sora-2", 0.80, "realism engine, 720p"),
+        ("sora-2-pro", 2.40, "higher fidelity, slower"),
+    ]
+
+    def __init__(self, api_key: str, client: Optional[httpx.Client] = None,
+                 poll_interval_s: float = 5.0):
+        self._client = client or httpx.Client(timeout=120)
+        self._headers = {"Authorization": f"Bearer {api_key}"}
+        self._poll_interval_s = poll_interval_s
+
+    def models(self) -> list[ModelSpec]:
+        return [
+            ModelSpec(self.name, model, frozenset({GenerationKind.text_to_video}),
+                      CLASS_API, notes=notes, est_cost=cost)
+            for model, cost, notes in self.ROSTER
+        ]
+
+    def _seconds(self, params: dict) -> int:
+        wanted = float(params.get("duration_s", 8))
+        return min(self.SECONDS, key=lambda s: abs(s - wanted))
+
+    def generate(self, generation: Generation) -> ProviderResult:
+        params = generation.params or {}
+        portrait = params.get("aspect") == "9:16" or (
+            params.get("width") and params.get("height")
+            and params["width"] < params["height"]
+        )
+        submit = self._client.post(
+            f"{self.BASE}/v1/videos",
+            json={
+                "model": generation.model,
+                "prompt": generation.prompt,
+                "seconds": str(self._seconds(params)),
+                "size": "720x1280" if portrait else "1280x720",
+            },
+            headers=self._headers,
+        )
+        submit.raise_for_status()
+        video_id = submit.json()["id"]
+
+        while True:
+            status = self._client.get(f"{self.BASE}/v1/videos/{video_id}", headers=self._headers)
+            status.raise_for_status()
+            body = status.json()
+            state = body.get("status")
+            if state == "completed":
+                break
+            if state in ("failed", "cancelled"):
+                detail = (body.get("error") or {}).get("message", state)
+                raise RuntimeError(f"sora video {video_id} ended {state}: {detail}")
+            time.sleep(self._poll_interval_s)
+
+        content = self._client.get(
+            f"{self.BASE}/v1/videos/{video_id}/content", headers=self._headers
+        )
+        content.raise_for_status()
+        est = next((cost for model, cost, _ in self.ROSTER if model == generation.model), None)
+        return ProviderResult(
+            data=content.content, content_type="video/mp4",
+            external_id=video_id, cost=est,
+        )
+
+
+class VeoProvider:
+    """Google Veo via the Gemini API, direct (roadmap-v2 §3): the lighting/
+    cinematography engine in Higgsfield's merchandising. predictLongRunning
+    -> operation poll -> fetch; a network job on the cpu lane."""
+
+    name = "veo"
+    provider_class = CLASS_API
+
+    BASE = "https://generativelanguage.googleapis.com"
+    # Flat per-generation estimates at the fixed 8 s clip length
+    # (per-second pricing: ~$0.75/s standard, ~$0.40/s fast).
+    ROSTER: list[tuple[str, float, str]] = [
+        ("veo-3.0-generate-001", 6.00, "lighting/cinematography engine, with audio"),
+        ("veo-3.0-fast-generate-001", 3.20, "faster + cheaper Veo lane"),
+    ]
+
+    def __init__(self, api_key: str, client: Optional[httpx.Client] = None,
+                 poll_interval_s: float = 5.0):
+        self._client = client or httpx.Client(timeout=120)
+        self._headers = {"x-goog-api-key": api_key}
+        self._poll_interval_s = poll_interval_s
+
+    def models(self) -> list[ModelSpec]:
+        return [
+            ModelSpec(self.name, model, frozenset({GenerationKind.text_to_video}),
+                      CLASS_API, notes=notes, est_cost=cost)
+            for model, cost, notes in self.ROSTER
+        ]
+
+    def generate(self, generation: Generation) -> ProviderResult:
+        params = generation.params or {}
+        parameters: dict = {}
+        if params.get("aspect") in ("9:16", "16:9"):
+            parameters["aspectRatio"] = params["aspect"]
+        submit = self._client.post(
+            f"{self.BASE}/v1beta/models/{generation.model}:predictLongRunning",
+            json={"instances": [{"prompt": generation.prompt}],
+                  **({"parameters": parameters} if parameters else {})},
+            headers=self._headers,
+        )
+        submit.raise_for_status()
+        operation = submit.json()["name"]
+
+        while True:
+            status = self._client.get(f"{self.BASE}/v1beta/{operation}", headers=self._headers)
+            status.raise_for_status()
+            body = status.json()
+            if body.get("error"):
+                raise RuntimeError(f"veo operation {operation} failed: {body['error']}")
+            if body.get("done"):
+                break
+            time.sleep(self._poll_interval_s)
+
+        response = body.get("response", {})
+        samples = (
+            response.get("generateVideoResponse", {}).get("generatedSamples")
+            or response.get("generatedVideos")
+            or []
+        )
+        if not samples:
+            raise RuntimeError(f"veo operation {operation} returned no video")
+        video = samples[0].get("video", samples[0])
+        est = next((cost for model, cost, _ in self.ROSTER if model == generation.model), None)
+
+        if video.get("bytesBase64Encoded"):
+            import base64
+
+            data = base64.b64decode(video["bytesBase64Encoded"])
+            return ProviderResult(data=data, content_type="video/mp4",
+                                  external_id=operation, cost=est)
+        uri = video.get("uri")
+        if not uri:
+            raise RuntimeError(f"veo operation {operation}: unrecognised video shape")
+        download = self._client.get(uri, headers=self._headers, follow_redirects=True)
+        download.raise_for_status()
+        return ProviderResult(data=download.content, content_type="video/mp4",
+                              external_id=operation, cost=est)
+
+
 @dataclass
 class ProviderRegistry:
     providers: dict[str, GenerationProvider] = field(default_factory=dict)
@@ -318,4 +475,8 @@ def build_registry(settings: Optional[Settings] = None) -> ProviderRegistry:
         registry.register(FalProvider(settings.fal_api_key))
     if settings.elevenlabs_api_key:
         registry.register(ElevenLabsProvider(settings.elevenlabs_api_key))
+    if settings.openai_api_key:
+        registry.register(SoraProvider(settings.openai_api_key))
+    if settings.gemini_api_key:
+        registry.register(VeoProvider(settings.gemini_api_key))
     return registry

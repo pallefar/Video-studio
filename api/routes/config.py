@@ -37,6 +37,8 @@ async def config_status() -> dict[str, bool]:
         "comfy_configured": bool(settings.comfy_url),
         "fal_configured": bool(settings.fal_api_key),
         "elevenlabs_configured": bool(settings.elevenlabs_api_key),
+        "openai_configured": bool(settings.openai_api_key),
+        "gemini_configured": bool(settings.gemini_api_key),
         "pexels_configured": bool(settings.pexels_api_key),
         "pixabay_configured": bool(settings.pixabay_api_key),
         "youtube_configured": bool(

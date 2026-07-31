@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # network jobs. Configuring the key is the per-provider data-egress
     # decision — prompts/scripts are sent to ElevenLabs when used.
     elevenlabs_api_key: str = ""
+    # Direct frontier-video APIs (roadmap-v2 §3 "direct APIs where it
+    # matters"): OpenAI Sora and Google Veo (Gemini API). Same rules.
+    openai_api_key: str = ""
+    gemini_api_key: str = ""
 
     # YouTube publish (M6): OAuth refresh-token flow. Unconfigured -> the
     # publish stage waits instead of failing, like a missing ffmpeg.

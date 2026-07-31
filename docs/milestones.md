@@ -118,7 +118,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 
 - [x] `GenerationProvider` interface: capability discovery, submit, poll, fetch-to-MinIO; every output lands as an `Asset` (`origin='generated'`) with provider/model/params/cost provenance
 - [x] Local provider: wan-lane executor — **ComfyUI headless decided and landed**: `pipeline_core/comfy.py` submit→poll→fetch client + per-model workflow templates as package data, CPU-proven against a fake ComfyUI (`tests/test_comfy.py`); `DEV_ENGINES=1` placeholder executor covers non-CUDA e2e; real-weights rendering = `COMFY_URL` config on the workstation (docs/workstation.md)
-- [x] API provider class: aggregator gateway first (fal.ai) — keys from env only, unconfigured providers don't appear in the registry *(direct Sora/Veo integrations still open)*
+- [x] API provider class: aggregator gateway first (fal.ai) — keys from env only, unconfigured providers don't appear in the registry *(direct integrations landed 2026-07-31: Sora via the OpenAI Videos API and Veo via the Gemini API — t2v, cpu-lane network jobs, per-generation cost estimates; ElevenLabs audio landed with M29)*
 - [x] API jobs run as network jobs on the CPU lane — never touch the GPU lock
 - [x] Fallback chains: a request may declare provider preference order *(cross-lane re-dispatch on failure)*
 - [ ] Benchmark on the 3090: Fun-Camera A14B GGUF + 4-step LoRA latency and VRAM (decides 14B vs 5B default)

@@ -423,3 +423,131 @@ def test_voiceover_route_via_elevenlabs_runs_on_cpu_lane(client, dispatcher):
     assert "ElevenLabs" in body["params"]["asset_license"]
     queue, _, _, _ = dispatcher.calls[-1]
     assert queue == "cpu"  # network job — never the GPU lock
+
+
+# --- Sora + Veo direct adapters (the M10 "direct APIs" item) ----------------
+
+
+def test_registry_gates_sora_and_veo_on_keys():
+    empty = build_registry(Settings(openai_api_key="", gemini_api_key="", _env_file=None))
+    assert "sora" not in empty.providers and "veo" not in empty.providers
+    registry = build_registry(Settings(openai_api_key="k", gemini_api_key="k", _env_file=None))
+    assert "sora" in registry.providers and "veo" in registry.providers
+    for provider in ("sora", "veo"):
+        assert all(s.provider_class == "api" for s in registry.providers[provider].models())
+
+
+def test_sora_submit_poll_download():
+    from pipeline_core.providers import SoraProvider
+
+    states = iter(["queued", "in_progress", "completed"])
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer oai-key"
+        if request.method == "POST":
+            seen["body"] = json.loads(request.content)
+            return httpx.Response(200, json={"id": "video_1", "status": "queued"})
+        if request.url.path.endswith("/content"):
+            return httpx.Response(200, content=b"sora-mp4")
+        return httpx.Response(200, json={"id": "video_1", "status": next(states)})
+
+    provider = SoraProvider("oai-key", httpx.Client(transport=httpx.MockTransport(handler)),
+                            poll_interval_s=0)
+    generation = Generation(provider="sora", model="sora-2", kind=T2V,
+                            prompt="a slow dolly through rain",
+                            params={"duration_s": 7, "aspect": "9:16"})
+    result = provider.generate(generation)
+    assert result.data == b"sora-mp4"
+    assert result.external_id == "video_1"
+    assert result.cost == 0.80
+    # duration snapped to the API's allowed lengths; portrait size honoured
+    assert seen["body"]["seconds"] == "8"
+    assert seen["body"]["size"] == "720x1280"
+
+
+def test_sora_failure_raises_with_detail():
+    from pipeline_core.providers import SoraProvider
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"id": "video_2"})
+        return httpx.Response(200, json={
+            "id": "video_2", "status": "failed",
+            "error": {"message": "content policy"},
+        })
+
+    provider = SoraProvider("k", httpx.Client(transport=httpx.MockTransport(handler)),
+                            poll_interval_s=0)
+    generation = Generation(provider="sora", model="sora-2", kind=T2V, prompt="x")
+    with pytest.raises(RuntimeError, match="content policy"):
+        provider.generate(generation)
+
+
+def test_veo_operation_flow_with_uri_download():
+    from pipeline_core.providers import VeoProvider
+
+    polls = iter([{"name": "operations/op-1", "done": False},
+                  {"name": "operations/op-1", "done": True,
+                   "response": {"generateVideoResponse": {"generatedSamples": [
+                       {"video": {"uri": "https://generativelanguage.googleapis.com/files/f1:download"}}
+                   ]}}}])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["x-goog-api-key"] == "gem-key"
+        if request.method == "POST":
+            assert request.url.path.endswith("veo-3.0-generate-001:predictLongRunning")
+            return httpx.Response(200, json={"name": "operations/op-1"})
+        if "download" in str(request.url):
+            return httpx.Response(200, content=b"veo-mp4")
+        return httpx.Response(200, json=next(polls))
+
+    provider = VeoProvider("gem-key", httpx.Client(transport=httpx.MockTransport(handler)),
+                           poll_interval_s=0)
+    generation = Generation(provider="veo", model="veo-3.0-generate-001", kind=T2V,
+                            prompt="golden hour over a fjord")
+    result = provider.generate(generation)
+    assert result.data == b"veo-mp4"
+    assert result.external_id == "operations/op-1"
+    assert result.cost == 6.00
+
+
+def test_veo_inline_base64_video():
+    import base64
+
+    from pipeline_core.providers import VeoProvider
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"name": "operations/op-2"})
+        return httpx.Response(200, json={
+            "name": "operations/op-2", "done": True,
+            "response": {"generatedVideos": [
+                {"video": {"bytesBase64Encoded": base64.b64encode(b"inline-mp4").decode()}}
+            ]},
+        })
+
+    provider = VeoProvider("k", httpx.Client(transport=httpx.MockTransport(handler)),
+                           poll_interval_s=0)
+    generation = Generation(provider="veo", model="veo-3.0-fast-generate-001", kind=T2V, prompt="x")
+    result = provider.generate(generation)
+    assert result.data == b"inline-mp4"
+    assert result.cost == 3.20
+
+
+def test_veo_operation_error_raises():
+    from pipeline_core.providers import VeoProvider
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(200, json={"name": "operations/op-3"})
+        return httpx.Response(200, json={
+            "name": "operations/op-3", "done": True,
+            "error": {"code": 400, "message": "unsupported region"},
+        })
+
+    provider = VeoProvider("k", httpx.Client(transport=httpx.MockTransport(handler)),
+                           poll_interval_s=0)
+    generation = Generation(provider="veo", model="veo-3.0-generate-001", kind=T2V, prompt="x")
+    with pytest.raises(RuntimeError, match="unsupported region"):
+        provider.generate(generation)
