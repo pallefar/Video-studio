@@ -120,3 +120,11 @@ def test_gpu_units_never_scale_out():
     running two)."""
     names = [p.name for p in (REPO / "deploy/systemd").glob("*")]
     assert not any("@" in name for name in names)
+
+
+def test_settings_parse_a_fresh_env_copied_from_example():
+    """setup copies .env.example verbatim — blank values (DEV_ENGINES=) must
+    mean 'use the default', never a bool/int parse error on typed fields."""
+    settings = Settings(_env_file=str(REPO / ".env.example"))
+    assert settings.dev_engines is False
+    assert settings.comfy_timeout_s == 3600

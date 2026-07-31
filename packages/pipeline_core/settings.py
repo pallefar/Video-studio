@@ -11,7 +11,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # env_ignore_empty: .env.example ships every key blank (KEY=) and setup
+    # copies it verbatim — an empty value must mean "use the default", not a
+    # bool/int parse error on typed fields like DEV_ENGINES.
+    model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
 
     database_url: str = "postgresql+psycopg://avatar:avatar@localhost:5432/avatar"
     redis_url: str = "redis://localhost:6379/0"
