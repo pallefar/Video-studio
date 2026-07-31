@@ -1,0 +1,17 @@
+# ComfyUI headless — the M10 wan-lane executor (docs/workstation.md).
+# Listens on localhost only; the wan worker reaches it via COMFY_URL.
+[Unit]
+Description=ComfyUI headless (wan-lane executor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=studio
+WorkingDirectory=/opt/ComfyUI
+ExecStart=/opt/ComfyUI/.venv/bin/python main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

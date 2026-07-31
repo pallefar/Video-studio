@@ -1,0 +1,20 @@
+# Wan lane: generation + identity training (wan queue). A separate process
+# from the render worker by design — the exclusive GPU lock
+# (pipeline_core.locks) keeps the two lanes off the card simultaneously.
+# Concurrency 1, same as the render lane.
+[Unit]
+Description=AI video studio wan-lane worker (wan queue)
+After=network-online.target studio-comfyui.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=studio
+WorkingDirectory=/opt/video-studio
+EnvironmentFile=/opt/video-studio/.env
+ExecStart=/opt/video-studio/.venv/bin/python worker_gpu/run_wan.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

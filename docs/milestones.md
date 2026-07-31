@@ -261,3 +261,12 @@ alone for social posting.
 - [x] `scripts/backfill_embeddings.py`: fills missing resolver vectors inline; `--recaption` queues Florence-2 jobs for placeholder captions
 
 **Accept:** `pytest tests/test_captioning.py` — placeholder heuristic, stage idempotency + re-embedding with an injected fake captioner, ingest-tail wiring, backfill script ✅ (2026-07-31; the real Florence-2 load is a workstation install like every local model)
+
+## M25 — Ops: backup, restore, services
+
+- [x] `scripts/backup.sh`: `pg_dump -Fc` (sqlite copy in dev) + incremental bucket mirror via `scripts/sync_bucket.py` — ObjectStore only, works against MinIO and S3/R2 alike; redis deliberately excluded (stages idempotent, docs/ops.md)
+- [x] `scripts/restore.sh`: `pg_restore --clean --if-exists` + gap-filling bucket push (never clobbers newer artefacts); **drill executed against the live container stack** — snapshot → scratch DB + scratch bucket → verified contents
+- [x] `.env.example` audit: every Settings field documented (stock/fal keys, YouTube OAuth, QWEN_MODEL_PATH, DEV_ENGINES, COMFY_*) with a two-way drift guard in `tests/test_ops.py`
+- [x] `deploy/systemd/` (api, worker-cpu, worker-gpu, worker-wan, comfyui) + `deploy/launchd/` Mac dev-mode units — the wan queue finally has a dedicated runner (`worker_gpu/run_wan.py`, landed with Phase A); GPU units are single-instance by construction, never templated
+
+**Accept:** `pytest tests/test_ops.py` — env drift both directions, sync round-trip incl. incremental/no-clobber semantics, unit coverage per lane ✅ (2026-07-31; backup+restore drill run against the live stack)
