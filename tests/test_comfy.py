@@ -28,7 +28,7 @@ from schema.models import Generation, GenerationKind
 COMFY_MODELS = [
     "wan2.2-t2v", "wan2.2-i2v", "wan2.2-fun-camera", "wan2.2-vace-fun",
     "wan2.1-vace-1.3b", "z-image-turbo", "qwen-image", "sdxl", "ace-step",
-    "musetalk-image", "chatterbox",
+    "musetalk-image", "chatterbox", "uni3c", "recammaster",
 ]
 
 
@@ -197,6 +197,26 @@ def test_build_values_uploads_source_asset():
     assert str(generation.id) in values["source_video"]
 
 
+def test_build_values_trajectory_serialises_to_json():
+    """Uni3C waypoints ride into the embeds node as a JSON string (M11)."""
+    fake = FakeComfy()
+    client = _client(fake)
+    template = load_template("uni3c")
+    waypoints = [{"pan": 0.0, "zoom": 1.0}, {"pan": 45.0, "zoom": 1.5}]
+    with mock_aws():
+        store = ObjectStore(Settings(s3_endpoint="", s3_bucket="comfy-test"))
+        store.ensure_bucket()
+        uri = store.put_bytes("stills/frame.png", b"png-bytes")
+        generation = _generation(model="uni3c", kind=GenerationKind.image_to_video,
+                                 trajectory=waypoints, image_uri=uri, duration_s=2)
+        values = build_values(generation, template, client, store)
+    assert json.loads(values["trajectory"]) == waypoints
+    assert values["source_image"] in fake.uploads
+    graph = inject(template, values)
+    assert json.loads(graph["23"]["inputs"]["trajectory"]) == waypoints
+    assert graph["12"]["inputs"]["image"] == values["source_image"]
+
+
 def test_music_length_is_seconds_not_frames():
     fake = FakeComfy(output_key="audio")
     client = _client(fake)
@@ -300,7 +320,7 @@ def test_every_custom_node_type_maps_to_a_pack():
     manifest pack — otherwise the Settings check can't say what to install."""
     from pipeline_core.comfy_nodes import pack_for_type, template_node_types
 
-    core_prefixes = ("VHS_", "MuseTalk", "FL_Chatterbox", "UnetLoaderGGUF")
+    core_prefixes = ("VHS_", "MuseTalk", "FL_Chatterbox", "UnetLoaderGGUF", "WanVideo")
     for model, types in template_node_types().items():
         for class_type in types:
             if class_type.startswith(core_prefixes) or class_type == "UnetLoaderGGUF":
@@ -330,7 +350,9 @@ def test_pack_status_probes_installed_packs():
     assert status["ComfyUI-VideoHelperSuite"]["installed"] is True
     assert status["ComfyUI-GGUF"]["installed"] is True
     assert status["ComfyUI-MuseTalk"]["installed"] is False
-    assert status["ComfyUI-WanVideoWrapper"]["optional"] is True
+    # M11 advanced templates (uni3c/recammaster) made the wrapper required
+    assert status["ComfyUI-WanVideoWrapper"]["optional"] is False
+    assert status["ComfyUI-WanVideoWrapper"]["installed"] is False
 
 
 def test_install_script_clones_every_manifest_pack():

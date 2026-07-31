@@ -90,6 +90,12 @@ class LocalWanProvider:
             ModelSpec(self.name, "wan2.2-t2v", frozenset({GenerationKind.text_to_video}), CLASS_LOCAL, est_cost=0.0),
             ModelSpec(self.name, "wan2.2-i2v", frozenset({GenerationKind.image_to_video}), CLASS_LOCAL, est_cost=0.0),
             ModelSpec(self.name, "wan2.2-fun-camera", video, CLASS_LOCAL, "camera presets, M11", est_cost=0.0),
+            # Advanced mode (M11): Uni3C custom trajectories re-film a still;
+            # ReCamMaster re-shoots existing footage with a new camera move.
+            ModelSpec(self.name, "uni3c", frozenset({GenerationKind.image_to_video}),
+                      CLASS_LOCAL, "custom trajectories, M11 advanced (Apache 2.0)", est_cost=0.0),
+            ModelSpec(self.name, "recammaster", frozenset({GenerationKind.video_to_video}),
+                      CLASS_LOCAL, "re-shoot existing footage, M11 advanced (MIT)", est_cost=0.0),
             # Image studio roster (M12, roadmap-v2 §2) — all commercially clean.
             ModelSpec(self.name, "z-image-turbo", image, CLASS_LOCAL, "image daily driver, M12", est_cost=0.0),
             ModelSpec(self.name, "qwen-image", image, CLASS_LOCAL, "text-heavy thumbnails, M12", est_cost=0.0),

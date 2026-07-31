@@ -1,0 +1,173 @@
+{
+  "output": {
+    "node": "60",
+    "kind": "video"
+  },
+  "defaults": {
+    "width": 832,
+    "height": 480,
+    "fps": 16,
+    "negative": "static, blurry, low quality"
+  },
+  "inputs": {
+    "prompt": [
+      "20",
+      "inputs",
+      "positive_prompt"
+    ],
+    "negative": [
+      "20",
+      "inputs",
+      "negative_prompt"
+    ],
+    "seed": [
+      "30",
+      "inputs",
+      "seed"
+    ],
+    "width": [
+      "25",
+      "inputs",
+      "width"
+    ],
+    "height": [
+      "25",
+      "inputs",
+      "height"
+    ],
+    "length": [
+      "25",
+      "inputs",
+      "num_frames"
+    ],
+    "trajectory": [
+      "23",
+      "inputs",
+      "trajectory"
+    ],
+    "source_image": [
+      "12",
+      "inputs",
+      "image"
+    ]
+  },
+  "required": [
+    "prompt",
+    "trajectory",
+    "source_image"
+  ],
+  "graph": {
+    "10": {
+      "class_type": "WanVideoModelLoader",
+      "inputs": {
+        "model": "wan2.2-i2v-a14b-bf16.safetensors",
+        "base_precision": "bf16",
+        "quantization": "disabled"
+      }
+    },
+    "11": {
+      "class_type": "WanVideoVAELoader",
+      "inputs": {
+        "model_name": "wan2.2-vae.safetensors",
+        "precision": "bf16"
+      }
+    },
+    "12": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": ""
+      }
+    },
+    "20": {
+      "class_type": "WanVideoTextEncode",
+      "inputs": {
+        "positive_prompt": "",
+        "negative_prompt": "static, blurry, low quality"
+      }
+    },
+    "22": {
+      "class_type": "WanVideoUni3C_ControlnetLoader",
+      "inputs": {
+        "model": "uni3c-controlnet.safetensors",
+        "base_precision": "bf16"
+      }
+    },
+    "23": {
+      "class_type": "WanVideoUni3C_embeds",
+      "inputs": {
+        "controlnet": [
+          "22",
+          0
+        ],
+        "trajectory": "",
+        "strength": 1.0
+      }
+    },
+    "25": {
+      "class_type": "WanVideoImageToVideoEncode",
+      "inputs": {
+        "width": 832,
+        "height": 480,
+        "num_frames": 33,
+        "start_image": [
+          "12",
+          0
+        ],
+        "vae": [
+          "11",
+          0
+        ]
+      }
+    },
+    "30": {
+      "class_type": "WanVideoSampler",
+      "inputs": {
+        "seed": 0,
+        "steps": 20,
+        "cfg": 6.0,
+        "scheduler": "unipc",
+        "model": [
+          "10",
+          0
+        ],
+        "text_embeds": [
+          "20",
+          0
+        ],
+        "image_embeds": [
+          "25",
+          0
+        ],
+        "uni3c_embeds": [
+          "23",
+          0
+        ]
+      }
+    },
+    "40": {
+      "class_type": "WanVideoDecode",
+      "inputs": {
+        "samples": [
+          "30",
+          0
+        ],
+        "vae": [
+          "11",
+          0
+        ]
+      }
+    },
+    "60": {
+      "class_type": "VHS_VideoCombine",
+      "inputs": {
+        "images": [
+          "40",
+          0
+        ],
+        "frame_rate": 16,
+        "format": "video/h264-mp4",
+        "filename_prefix": "studio"
+      }
+    }
+  }
+}

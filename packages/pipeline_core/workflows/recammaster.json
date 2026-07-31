@@ -1,0 +1,130 @@
+{
+  "output": {
+    "node": "60",
+    "kind": "video"
+  },
+  "defaults": {
+    "width": 832,
+    "height": 480,
+    "fps": 16,
+    "negative": "static, blurry, low quality"
+  },
+  "inputs": {
+    "prompt": [
+      "20",
+      "inputs",
+      "positive_prompt"
+    ],
+    "negative": [
+      "20",
+      "inputs",
+      "negative_prompt"
+    ],
+    "seed": [
+      "30",
+      "inputs",
+      "seed"
+    ],
+    "camera_motion": [
+      "22",
+      "inputs",
+      "camera_pose"
+    ],
+    "source_video": [
+      "13",
+      "inputs",
+      "video"
+    ]
+  },
+  "required": [
+    "prompt",
+    "source_video"
+  ],
+  "graph": {
+    "10": {
+      "class_type": "WanVideoModelLoader",
+      "inputs": {
+        "model": "recammaster-wan2.1-t2v-1.3b-bf16.safetensors",
+        "base_precision": "bf16",
+        "quantization": "disabled"
+      }
+    },
+    "11": {
+      "class_type": "WanVideoVAELoader",
+      "inputs": {
+        "model_name": "wan2.1-vae.safetensors",
+        "precision": "bf16"
+      }
+    },
+    "13": {
+      "class_type": "VHS_LoadVideo",
+      "inputs": {
+        "video": "",
+        "frame_load_cap": 81
+      }
+    },
+    "20": {
+      "class_type": "WanVideoTextEncode",
+      "inputs": {
+        "positive_prompt": "",
+        "negative_prompt": "static, blurry, low quality"
+      }
+    },
+    "22": {
+      "class_type": "WanVideoReCamMasterCameraEmbed",
+      "inputs": {
+        "camera_pose": "Static",
+        "source_video": [
+          "13",
+          0
+        ]
+      }
+    },
+    "30": {
+      "class_type": "WanVideoSampler",
+      "inputs": {
+        "seed": 0,
+        "steps": 20,
+        "cfg": 6.0,
+        "scheduler": "unipc",
+        "model": [
+          "10",
+          0
+        ],
+        "text_embeds": [
+          "20",
+          0
+        ],
+        "image_embeds": [
+          "22",
+          0
+        ]
+      }
+    },
+    "40": {
+      "class_type": "WanVideoDecode",
+      "inputs": {
+        "samples": [
+          "30",
+          0
+        ],
+        "vae": [
+          "11",
+          0
+        ]
+      }
+    },
+    "60": {
+      "class_type": "VHS_VideoCombine",
+      "inputs": {
+        "images": [
+          "40",
+          0
+        ],
+        "frame_rate": 16,
+        "format": "video/h264-mp4",
+        "filename_prefix": "studio"
+      }
+    }
+  }
+}

@@ -15,10 +15,16 @@ from api.routes.generations import get_registry
 from pipeline_core.generation import run_generation
 from pipeline_core.presets import (
     CAMERA_PRESETS,
+    RECAM_MODEL,
+    UNI3C_MODEL,
     PresetError,
+    TrajectoryPoint,
     compose,
+    compose_reshoot,
+    compose_trajectory,
     get_preset,
     validate_stack,
+    validate_trajectory,
 )
 from pipeline_core.providers import ProviderRegistry
 from pipeline_core.settings import Settings
@@ -191,3 +197,126 @@ def test_preset_generation_lands_in_asset_library(client, engine, dispatcher, mo
         assert asset.origin == AssetOrigin.generated
         assert asset.approved is False
         assert "neon-lit alley" in asset.caption
+
+
+# --- Advanced mode (M11): Uni3C trajectories + ReCamMaster re-shoot --------
+
+
+def test_advanced_models_registered_on_local_provider():
+    from pipeline_core.providers import LocalWanProvider
+    from schema.models import GenerationKind
+
+    specs = {s.model: s for s in LocalWanProvider().models()}
+    assert specs[UNI3C_MODEL].kinds == frozenset({GenerationKind.image_to_video})
+    assert specs[RECAM_MODEL].kinds == frozenset({GenerationKind.video_to_video})
+    # both are 14B-class wan-lane models — never the shared render lane
+    assert specs[UNI3C_MODEL].lane == "wan"
+    assert specs[RECAM_MODEL].lane == "wan"
+
+
+def test_trajectory_validation():
+    with pytest.raises(PresetError, match="at least"):
+        validate_trajectory([TrajectoryPoint()])
+    with pytest.raises(PresetError, match="at most"):
+        validate_trajectory([TrajectoryPoint(pan=i) for i in range(17)])
+    with pytest.raises(PresetError, match="never moves"):
+        validate_trajectory([TrajectoryPoint(), TrajectoryPoint()])
+    with pytest.raises(PresetError, match="invalid trajectory"):
+        validate_trajectory([{"pan": 999}, {"pan": 0}])
+    points = validate_trajectory([{"pan": 0}, {"pan": 45, "zoom": 1.5}])
+    assert points[1].zoom == 1.5
+
+
+def test_compose_trajectory_and_reshoot():
+    points = validate_trajectory([{"pan": 0}, {"pan": 90}])
+    prompt, params = compose_trajectory(points, "a lighthouse at dusk")
+    assert "a lighthouse at dusk" in prompt
+    assert params["advanced"] == "uni3c"
+    assert params["trajectory"][1]["pan"] == 90
+
+    prompt, params = compose_reshoot(validate_stack(["orbit_360"]))
+    assert prompt.startswith("re-shoot:")
+    assert params["advanced"] == "recammaster"
+    assert params["camera_motion"] == ["Pan Left"]
+
+
+def test_trajectory_endpoint_golden_path(client, dispatcher):
+    response = client.post(
+        "/presets/trajectory",
+        json={
+            "subject": "a lighthouse at dusk",
+            "trajectory": [{"pan": 0}, {"pan": 45, "zoom": 1.4}],
+            "image_uri": "s3://avatar-pipeline/stills/lighthouse.png",
+        },
+    )
+    assert response.status_code == 201, response.text
+    generation = response.json()
+    assert generation["provider"] == "local"
+    assert generation["model"] == UNI3C_MODEL
+    assert generation["kind"] == "image_to_video"
+    assert generation["params"]["image_uri"].endswith("lighthouse.png")
+    assert generation["params"]["trajectory"][1]["zoom"] == 1.4
+    assert dispatcher.calls[-1][0] == "wan"  # exclusive-lock lane
+
+
+def test_trajectory_endpoint_rejects_static_path(client):
+    response = client.post(
+        "/presets/trajectory",
+        json={
+            "subject": "x y",
+            "trajectory": [{"pan": 0}, {"pan": 0}],
+            "image_uri": "s3://avatar-pipeline/stills/frame.png",
+        },
+    )
+    assert response.status_code == 422
+    assert "never moves" in response.json()["detail"]
+
+
+def test_reshoot_endpoint_derives_with_provenance(client, engine, dispatcher):
+    with Session(engine) as session:
+        source = Asset(origin=AssetOrigin.own,
+                       uri=f"s3://avatar-pipeline/own/{uuid.uuid4()}.mp4",
+                       caption="drone shot", has_identifiable_people=False,
+                       approved=True)
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        source_id = str(source.id)
+        source_uri = source.uri
+
+    response = client.post(
+        "/presets/reshoot",
+        json={"asset_id": source_id, "preset_ids": ["arc_right"]},
+    )
+    assert response.status_code == 201, response.text
+    generation = response.json()
+    assert generation["model"] == RECAM_MODEL
+    assert generation["kind"] == "video_to_video"
+    assert generation["source_asset_id"] == source_id
+    assert generation["params"]["source_asset_uri"] == source_uri
+    assert "re-shoot" in generation["prompt"]
+    assert dispatcher.calls[-1][0] == "wan"
+
+
+def test_reshoot_endpoint_404_on_missing_asset(client):
+    response = client.post(
+        "/presets/reshoot",
+        json={"asset_id": str(uuid.uuid4()), "preset_ids": ["zoom_in"]},
+    )
+    assert response.status_code == 404
+
+
+def test_reshoot_endpoint_rejects_bad_stack(client, engine):
+    with Session(engine) as session:
+        source = Asset(origin=AssetOrigin.own,
+                       uri=f"s3://avatar-pipeline/own/{uuid.uuid4()}.mp4",
+                       has_identifiable_people=False, approved=True)
+        session.add(source)
+        session.commit()
+        source_id = str(source.id)
+    response = client.post(
+        "/presets/reshoot",
+        json={"asset_id": source_id, "preset_ids": ["bullet_time", "zoom_in"]},
+    )
+    assert response.status_code == 422
+    assert "not stackable" in response.json()["detail"]

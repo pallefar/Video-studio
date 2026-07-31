@@ -41,6 +41,26 @@ def session(engine):
         yield session
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _no_dotenv():
+    """A developer machine's .env (a live Ollama, real API keys) must never
+    leak into the suite — tests behave identically here and in CI, where no
+    .env exists. Real env vars (monkeypatch.setenv) still apply; explicit
+    `Settings(_env_file=None)` in tests keeps working."""
+    from pipeline_core.settings import Settings
+
+    Settings.model_config["env_file"] = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_enhancer_cache(monkeypatch):
+    """The enhancer is cached per process — clear it so every test re-selects
+    from its own environment, independent of test order."""
+    import pipeline_core.enhance as enhance
+
+    monkeypatch.setattr(enhance, "_enhancer", None)
+
+
 @pytest.fixture()
 def dispatcher():
     return RecordingDispatcher()

@@ -130,7 +130,7 @@ locally/on rented GPUs AND proprietary models via API, behind one interface.
 - [x] Preset registry as data (JSON): camera moves (crash zoom, dolly, dolly-zoom, orbit, FPV, bullet time…) with prompt templates + LoRA refs, stackable up to 3 *(16 presets in `pipeline_core/presets.py`; unaudited-LoRA validation structural)*
 - [ ] Wan2.2-Fun-Control-Camera integration in the local provider; Civitai LoRAs individually licence-audited before inclusion *(motion codes + params wired through; runs once COMFY_URL points at the workstation ComfyUI — docs/workstation.md)*
 - [x] Preset picker UI: preset → subject → generate (preset-first, prompt optional) — Higgsfield-style dark gallery, stack up to 3, engine picker from the provider catalog, live generation feed
-- [ ] Advanced mode: Uni3C custom trajectories; ReCamMaster re-shoot of existing footage
+- [x] Advanced mode: Uni3C custom trajectories; ReCamMaster re-shoot of existing footage *(`POST /presets/trajectory` — validated waypoints on `uni3c` i2v; `POST /presets/reshoot` — preset stack over `recammaster` v2v with the M13 provenance chain; WanVideoWrapper templates + node-pack manifest wired, names schema-verified against `/object_info` on the workstation like chatterbox; Advanced panel in the Create tab; renders once COMFY_URL points at the workstation — docs/workstation.md)*
 
 **Accept:** golden-path test: preset request → generation record → asset with `origin='generated'`; a preset referencing an unaudited LoRA fails validation ✅ (2026-07-29, `tests/test_presets.py`)
 

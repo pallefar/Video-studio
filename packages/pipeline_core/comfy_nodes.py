@@ -46,7 +46,7 @@ NODE_PACKS: tuple[NodePack, ...] = (
         provides=("VHS_VideoCombine", "VHS_LoadVideo"),
         needed_for=(
             "wan2.2-t2v", "wan2.2-i2v", "wan2.2-fun-camera", "wan2.2-vace-fun",
-            "wan2.1-vace-1.3b", "musetalk-image",
+            "wan2.1-vace-1.3b", "musetalk-image", "uni3c", "recammaster",
         ),
         notes="video load/combine nodes — every video template's output stage",
     ),
@@ -82,10 +82,16 @@ NODE_PACKS: tuple[NodePack, ...] = (
         name="ComfyUI-WanVideoWrapper",
         repo="https://github.com/kijai/ComfyUI-WanVideoWrapper",
         license="Apache-2.0",
-        provides=("WanVideoSampler", "WanVideoModelLoader"),
-        needed_for=(),
-        notes="advanced Wan workflows: Uni3C trajectories, ReCamMaster (M11)",
-        optional=True,
+        provides=(
+            "WanVideoSampler", "WanVideoModelLoader", "WanVideoVAELoader",
+            "WanVideoTextEncode", "WanVideoDecode", "WanVideoImageToVideoEncode",
+            "WanVideoUni3C_ControlnetLoader", "WanVideoUni3C_embeds",
+            "WanVideoReCamMasterCameraEmbed",
+        ),
+        needed_for=("uni3c", "recammaster"),
+        notes="advanced Wan workflows: Uni3C trajectories, ReCamMaster (M11) — "
+              "node names schema-verified against the installed pack's "
+              "/object_info on the workstation, like chatterbox (M29)",
     ),
     NodePack(
         name="ComfyUI-KJNodes",

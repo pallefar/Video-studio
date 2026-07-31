@@ -232,6 +232,10 @@ def build_values(generation: Generation, template: dict, client: ComfyUIClient,
     if motion:
         values["camera_motion"] = ", ".join(motion)
 
+    if params.get("trajectory"):
+        # Uni3C waypoints travel as a JSON string into the embeds node
+        values["trajectory"] = json.dumps(params["trajectory"])
+
     if params.get("identity_lora_uri"):
         values["lora_name"] = params["identity_lora_uri"].rsplit("/", 1)[-1]
 
