@@ -106,6 +106,56 @@ if [ ! -d web/node_modules ]; then
 fi
 ok "web deps"
 
+# --- Port conflicts ----------------------------------------------------------
+# Something else may already own 5432/6379/9000 (a Homebrew Postgres is the
+# classic). For each service: if the default port is busy and it isn't OUR
+# container, pick the next free port, export it for compose, and rewrite the
+# matching URL in .env so the app follows.
+port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3>&- && return 0 || return 1; }
+
+ours() {  # is our own compose stack already bound to this port?
+  local cid
+  for cid in $(docker compose ps -q 2>/dev/null); do
+    docker port "$cid" 2>/dev/null | grep -q ":$1$" && return 0
+  done
+  return 1
+}
+
+free_port() {  # first free port at or after $1
+  local p="$1"
+  while port_busy "$p"; do p=$((p + 1)); done
+  echo "$p"
+}
+
+set_env_var() {  # set_env_var KEY VALUE — idempotent upsert into .env
+  local key="$1" value="$2"
+  if grep -q "^${key}=" .env; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" .env && rm -f .env.bak
+  else
+    printf '%s=%s\n' "$key" "$value" >> .env
+  fi
+}
+
+resolve_port() {  # resolve_port NAME DEFAULT -> chosen port (exported)
+  local name="$1" default="$2" chosen="$2"
+  if port_busy "$default" && ! ours "$default"; then
+    chosen="$(free_port $((default + 1)))"
+    # stderr: stdout is the captured return value
+    todo "port $default is taken by another service — using $chosen for $name" >&2
+  fi
+  export "$name=$chosen"
+  set_env_var "$name" "$chosen"
+  echo "$chosen"
+}
+
+PG_PORT="$(resolve_port POSTGRES_PORT 5432)"
+RD_PORT="$(resolve_port REDIS_PORT 6379)"
+S3_PORT="$(resolve_port MINIO_PORT 9000)"
+resolve_port MINIO_CONSOLE_PORT 9001 >/dev/null
+set_env_var DATABASE_URL "postgresql+psycopg://avatar:avatar@localhost:${PG_PORT}/avatar"
+set_env_var REDIS_URL "redis://localhost:${RD_PORT}/0"
+set_env_var S3_ENDPOINT "http://localhost:${S3_PORT}"
+
 # --- Infrastructure + schema -------------------------------------------------
 todo "starting postgres / redis / minio"
 docker compose up -d --wait

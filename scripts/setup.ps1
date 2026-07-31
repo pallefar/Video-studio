@@ -104,6 +104,45 @@ if (-not (Test-Path web\node_modules)) {
 }
 Ok "web deps"
 
+# --- Port conflicts ----------------------------------------------------------
+# If 5432/6379/9000 are taken by another service (not our own containers),
+# pick free ports and keep .env's URLs in sync — compose reads .env.
+function Test-PortBusy([int]$Port) {
+  try { $c = New-Object Net.Sockets.TcpClient("127.0.0.1", $Port); $c.Close(); $true }
+  catch { $false }
+}
+function Test-Ours([int]$Port) {
+  foreach ($cid in (docker compose ps -q 2>$null)) {
+    if ((docker port $cid 2>$null) -match ":$Port$") { return $true }
+  }
+  $false
+}
+function Set-EnvVar([string]$Key, [string]$Value) {
+  $lines = Get-Content .env
+  if ($lines -match "^$Key=") {
+    $lines -replace "^$Key=.*", "$Key=$Value" | Set-Content .env
+  } else {
+    Add-Content .env "$Key=$Value"
+  }
+}
+function Resolve-Port([string]$Name, [int]$Default) {
+  $chosen = $Default
+  if ((Test-PortBusy $Default) -and -not (Test-Ours $Default)) {
+    $chosen = $Default + 1
+    while (Test-PortBusy $chosen) { $chosen++ }
+    Todo "port $Default is taken by another service - using $chosen for $Name"
+  }
+  Set-EnvVar $Name $chosen
+  $chosen
+}
+$pgPort = Resolve-Port "POSTGRES_PORT" 5432
+$rdPort = Resolve-Port "REDIS_PORT" 6379
+$s3Port = Resolve-Port "MINIO_PORT" 9000
+Resolve-Port "MINIO_CONSOLE_PORT" 9001 | Out-Null
+Set-EnvVar "DATABASE_URL" "postgresql+psycopg://avatar:avatar@localhost:$pgPort/avatar"
+Set-EnvVar "REDIS_URL" "redis://localhost:$rdPort/0"
+Set-EnvVar "S3_ENDPOINT" "http://localhost:$s3Port"
+
 # --- Infrastructure + schema -------------------------------------------------
 Todo "starting postgres / redis / minio"
 docker compose up -d --wait

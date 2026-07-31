@@ -5,6 +5,11 @@
 # dev credentials and no TLS, so they must never be reachable from the LAN.
 # A rented-GPU worker reaches them over Tailscale/WireGuard (pipeline-spec
 # §7), not by opening these ports.
+#
+# Host ports are env-overridable (POSTGRES_PORT, REDIS_PORT, MINIO_PORT,
+# MINIO_CONSOLE_PORT — compose reads .env) so the stack coexists with an
+# already-running Postgres/Redis; scripts/setup.sh picks free ports
+# automatically and keeps DATABASE_URL/REDIS_URL/S3_ENDPOINT in sync.
 services:
   postgres:
     image: postgres:16
@@ -13,7 +18,7 @@ services:
       POSTGRES_PASSWORD: avatar
       POSTGRES_DB: avatar
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +30,7 @@ services:
   redis:
     image: redis:7
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -41,8 +46,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - miniodata:/data
     healthcheck:
