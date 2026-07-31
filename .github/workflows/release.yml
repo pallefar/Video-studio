@@ -5,10 +5,21 @@ name: Release
 # users) and publishes a GitHub Release with notes from the milestone log.
 #
 #   git tag v0.29.0 && git push origin v0.29.0
+#
+# Or run it manually (Actions -> Release -> Run workflow) with the version
+# input — the release step then creates the tag at the chosen ref itself.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v0.29.0"
+        required: true
+
+env:
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 permissions:
   contents: write
@@ -32,7 +43,7 @@ jobs:
           npm run build
 
       - name: Package platform bundles
-        run: bash scripts/make_release.sh "${GITHUB_REF_NAME}"
+        run: bash scripts/make_release.sh "${VERSION}"
 
       - name: Release notes from the milestone log
         run: python3 scripts/release_notes.py > dist-release/NOTES.md
@@ -40,7 +51,8 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: Video Studio ${{ github.ref_name }}
+          tag_name: ${{ inputs.version || github.ref_name }}
+          name: Video Studio ${{ inputs.version || github.ref_name }}
           body_path: dist-release/NOTES.md
           files: |
             dist-release/*.zip
