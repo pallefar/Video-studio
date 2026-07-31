@@ -67,6 +67,43 @@ def build_server(client: StudioClient | None = None) -> MCPServer:
         """VFX presets applied to existing footage (levitation, restyles...)."""
         return await studio.get("/effects")
 
+    # ---- prompt intelligence (M27) ---------------------------------------
+
+    @server.tool()
+    async def prompt_catalog(category: str | None = None, kind: str | None = None) -> Any:
+        """Curated prompt-engineering catalog: structure frames, camera
+        language, lighting, styles, negatives, music tags — each with source
+        attribution. Filter by category and/or kind (video/image/music)."""
+        return await studio.get("/prompts/catalog", category=category, kind=kind)
+
+    @server.tool()
+    async def reverse_prompt(asset_id: str, save: bool = False) -> Any:
+        """Reverse prompt engineering: turn a library asset back into a
+        reusable prompt (+ standard negative) from its Florence-2 caption.
+        save=true files it in the prompt library."""
+        return await studio.post(f"/prompts/reverse/{asset_id}?save={str(save).lower()}", json={})
+
+    @server.tool()
+    async def save_prompt(
+        title: str,
+        text: str,
+        kind: str = "video",
+        negative: str | None = None,
+        tags: list[str] | None = None,
+    ) -> Any:
+        """Save a prompt to the studio's prompt library for reuse."""
+        return await studio.post(
+            "/prompts",
+            json={"title": title, "text": text, "kind": kind,
+                  "negative": negative, "tags": tags, "source": "manual"},
+        )
+
+    @server.tool()
+    async def list_saved_prompts() -> Any:
+        """The user's saved prompt library (manual, reverse-engineered, and
+        catalog-derived prompts)."""
+        return await studio.get("/prompts")
+
     # ---- projects & library ----------------------------------------------
 
     @server.tool()

@@ -697,6 +697,38 @@ class IdentityRead(IdentityBase):
 # ---------------------------------------------------------------------------
 
 
+class SavedPromptBase(SQLModel):
+    """M27: the user's prompt library — saved by hand, distilled from the
+    catalog, or reverse-engineered from a library asset."""
+
+    title: str
+    text: str
+    kind: str = "video"  # video | image | music
+    negative: Optional[str] = None
+    source: str = "manual"  # manual | reverse | catalog
+
+
+class SavedPrompt(SavedPromptBase, table=True):
+    __tablename__ = "saved_prompts"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    tags: Optional[list[str]] = Field(default=None, sa_column=Column(sa.JSON, nullable=True))
+    asset_id: Optional[uuid.UUID] = Field(default=None, foreign_key="assets.id")
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class SavedPromptCreate(SavedPromptBase):
+    tags: Optional[list[str]] = None
+    asset_id: Optional[uuid.UUID] = None
+
+
+class SavedPromptRead(SavedPromptBase):
+    id: uuid.UUID
+    tags: Optional[list[str]] = None
+    asset_id: Optional[uuid.UUID] = None
+    created_at: datetime
+
+
 class Metric(SQLModel, table=True):
     __tablename__ = "metrics"
 

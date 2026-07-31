@@ -16,6 +16,7 @@ from api.routes import (
     music,
     presets,
     projects,
+    prompts,
     publish,
     stats,
     storyboards,
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(images.router)
     app.include_router(presets.router)
     app.include_router(projects.router)
+    app.include_router(prompts.router)
     app.include_router(storyboards.router)
     app.include_router(timelines.router)
     app.include_router(metrics.router)

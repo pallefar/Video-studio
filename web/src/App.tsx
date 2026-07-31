@@ -8,6 +8,7 @@ import IdentitiesView from "./components/IdentitiesView";
 import ImagesView from "./components/ImagesView";
 import LibraryView from "./components/LibraryView";
 import ProjectsView from "./components/ProjectsView";
+import PromptsView from "./components/PromptsView";
 import SettingsView from "./components/SettingsView";
 import StoryboardsView from "./components/StoryboardsView";
 import { ToastProvider } from "./lib/toast";
@@ -18,6 +19,7 @@ type Tab =
   | "create"
   | "images"
   | "avatar"
+  | "prompts"
   | "storyboards"
   | "editor"
   | "library"
@@ -30,6 +32,7 @@ const ICONS: Record<Tab, string> = {
   create: "M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM19 15l.9 2.6L22.5 18.5l-2.6.9L19 22l-.9-2.6-2.6-.9 2.6-.9L19 15z",
   images: "M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm3 9l3-3 3 3 4-4 3 3M8.5 9.5a1 1 0 100.001 0z",
   avatar: "M12 12a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0",
+  prompts: "M8 9h8M8 13h5M21 12a9 9 0 11-4.4-7.7M17 3h5v5",
   storyboards: "M4 5h16a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1zm4 0v14M16 5v14M3 10h18M3 14h18",
   editor: "M3 8h18M3 12h12M3 16h15M19 12l3 2-3 2v-4z",
   library: "M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm9 0h7v7h-7v-7z",
@@ -39,7 +42,7 @@ const ICONS: Record<Tab, string> = {
 
 const GROUPS: { label: string; tabs: Tab[] }[] = [
   { label: "Studio", tabs: ["home"] },
-  { label: "Generate", tabs: ["create", "images", "avatar"] },
+  { label: "Generate", tabs: ["create", "images", "avatar", "prompts"] },
   { label: "Produce", tabs: ["storyboards", "editor"] },
   { label: "Manage", tabs: ["projects", "library", "identities", "settings"] },
 ];
@@ -50,6 +53,7 @@ const TITLES: Record<Tab, [string, string]> = {
   create: ["Create", "Preset-first video: pick a move, drop a subject, generate."],
   images: ["Image studio", "Styled stills, storyboard frames, thumbnails."],
   avatar: ["Avatar", "Script → voice → lip-sync → review → publish, always private."],
+  prompts: ["Prompts", "Prompt engineering as a catalog — plus reverse prompts from any asset."],
   storyboards: ["Storyboards", "Plan shots, generate per beat, export a real render."],
   editor: ["Editor", "Multi-track timeline over proxies, server-side final render."],
   library: ["Library", "Everything lands here — approve before anything can use it."],
@@ -153,6 +157,7 @@ export default function App() {
           {tab === "create" && <CreateView />}
           {tab === "images" && <ImagesView />}
           {tab === "avatar" && <AvatarView />}
+          {tab === "prompts" && <PromptsView />}
           {tab === "storyboards" && <StoryboardsView onOpenEditor={openEditor} />}
           {tab === "editor" && <EditorView openId={editorTimelineId} />}
           {tab === "library" && <LibraryView />}

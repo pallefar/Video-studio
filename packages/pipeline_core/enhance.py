@@ -27,15 +27,33 @@ class PromptEnhancer(Protocol):
     def enhance(self, prompt: str) -> str: ...
 
 
+# The Wan structure frame (M27 prompt catalog): subject -> motion -> camera
+# -> environment -> pacing. Applied when the raw prompt doesn't already
+# specify camera language.
+STRUCTURE_SUFFIX = (
+    "The camera holds a slow, deliberate push-in as the main motion unfolds; "
+    "soft natural key light, shallow depth of field, gentle background motion"
+)
+
+_CAMERA_WORDS = ("camera", "pan", "orbit", "dolly", "push-in", "pull back",
+                 "tilt", "handheld", "tripod", "zoom")
+
+
 class HeuristicEnhancer:
-    """Deterministic fallback: appends Wan-friendly quality vocabulary once."""
+    """Deterministic fallback: structures the prompt the way the Wan family
+    wants (camera + motion + light frame), then appends the quality
+    vocabulary — both idempotent."""
 
     name = "heuristic"
 
     def enhance(self, prompt: str) -> str:
-        if QUALITY_SUFFIX in prompt:
-            return prompt
-        return f"{prompt}, {QUALITY_SUFFIX}"
+        enhanced = prompt.rstrip().rstrip(".")
+        lowered = enhanced.lower()
+        if STRUCTURE_SUFFIX not in enhanced and not any(w in lowered for w in _CAMERA_WORDS):
+            enhanced = f"{enhanced}. {STRUCTURE_SUFFIX}"
+        if QUALITY_SUFFIX not in enhanced:
+            enhanced = f"{enhanced}, {QUALITY_SUFFIX}"
+        return enhanced
 
 
 class QwenEnhancer:

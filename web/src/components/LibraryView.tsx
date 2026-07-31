@@ -255,6 +255,23 @@ export default function LibraryView() {
                     Caption
                   </button>
                   <button
+                    onClick={() =>
+                      fetch(`/prompts/reverse/${asset.id}?save=true`, { method: "POST" }).then(
+                        async (r) =>
+                          toast(
+                            r.ok
+                              ? "Prompt reverse-engineered — saved in the Prompts tab"
+                              : ((await r.json()).detail ?? "Reverse prompt failed"),
+                            r.ok ? "success" : "error",
+                          ),
+                      )
+                    }
+                    className="mr-2 rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
+                    title="Reverse prompt engineering: caption → reusable prompt + negative (M27)"
+                  >
+                    → Prompt
+                  </button>
+                  <button
                     onClick={() => {
                       setFxTarget(asset);
                       setFxSelected([]);

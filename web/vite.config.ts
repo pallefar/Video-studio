@@ -12,7 +12,7 @@ export default defineConfig({
         "/jobs", "/loops", "/voices", "/assets", "/generations", "/presets",
         "/storyboards", "/styles", "/projects", "/timelines", "/healthz",
         "/identities", "/images", "/effects", "/emotions", "/music", "/metrics", "/stats",
-        "/config",
+        "/config", "/prompts",
       ].map((route) => [route, "http://localhost:8000"]),
     ),
   },
