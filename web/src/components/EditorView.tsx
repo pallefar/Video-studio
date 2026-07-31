@@ -16,9 +16,15 @@ const LANE_H = 56;
 const AUDIO_SUFFIXES = ["wav", "mp3", "m4a", "aac", "ogg", "flac"];
 
 type Drag =
-  | { kind: "move" | "trim-l" | "trim-r"; clipId: string; startX: number; orig: TimelineClip }
-  | { kind: "text-move" | "text-l" | "text-r"; clipId: string; startX: number; orig: TextClip }
-  | { kind: "audio-move" | "audio-l" | "audio-r"; clipId: string; startX: number; orig: AudioClip }
+  | ({ kind: "move" | "trim-l" | "trim-r"; clipId: string; startX: number; orig: TimelineClip } & {
+      recorded?: boolean;
+    })
+  | ({ kind: "text-move" | "text-l" | "text-r"; clipId: string; startX: number; orig: TextClip } & {
+      recorded?: boolean;
+    })
+  | ({ kind: "audio-move" | "audio-l" | "audio-r"; clipId: string; startX: number; orig: AudioClip } & {
+      recorded?: boolean;
+    })
   | null;
 
 interface SpriteCue {
@@ -83,7 +89,10 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [zoom, setZoom] = useState(1);
-  const [selected, setSelected] = useState<string | null>(null);
+  // Multi-select (shift-click extends); interaction vocabulary lifted from
+  // OpenCut (MIT) — the licence register's approved editor reference.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [snapOn, setSnapOn] = useState(true);
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [hover, setHover] = useState<{
@@ -98,6 +107,8 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const audiosRef = useRef<Record<string, HTMLAudioElement>>({});
   const framesRef = useRef<Record<string, FrameSource>>({});
   const drawSeqRef = useRef(0);
+  const historyRef = useRef<TimelineDocument[]>([]);
+  const redoRef = useRef<TimelineDocument[]>([]);
 
   const pxPerMs = PX_PER_MS * zoom;
 
@@ -116,9 +127,11 @@ export default function EditorView({ openId }: { openId?: string | null }) {
         setCurrent(t);
         setDoc(structuredClone(t.doc) as TimelineDocument);
         setDirty(false);
-        setSelected(null);
+        setSelectedIds([]);
         setPlaying(false);
         setPlayhead(0);
+        historyRef.current = [];
+        redoRef.current = [];
       });
     fetch(`/timelines/${id}/media`).then((r) => r.json()).then(setMedia);
   }, [disposeFrameSources]);
@@ -168,9 +181,16 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     }
   }, [doc, track, audio, extras]);
 
-  const mutate = (fn: (d: TimelineDocument) => void) => {
+  // record=false is for mid-drag updates: the gesture records ONE history
+  // entry on its first move, not one per pixel.
+  const mutate = (fn: (d: TimelineDocument) => void, record = true) => {
     setDoc((d) => {
       if (!d) return d;
+      if (record) {
+        historyRef.current.push(structuredClone(d) as TimelineDocument);
+        if (historyRef.current.length > 100) historyRef.current.shift();
+        redoRef.current = [];
+      }
       const next = structuredClone(d) as TimelineDocument;
       fn(next);
       return next;
@@ -178,7 +198,24 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     setDirty(true);
   };
 
+  const undo = () => {
+    const prev = historyRef.current.pop();
+    if (!prev || !doc) return;
+    redoRef.current.push(structuredClone(doc) as TimelineDocument);
+    setDoc(prev);
+    setDirty(true);
+  };
+
+  const redo = () => {
+    const next = redoRef.current.pop();
+    if (!next || !doc) return;
+    historyRef.current.push(structuredClone(doc) as TimelineDocument);
+    setDoc(next);
+    setDirty(true);
+  };
+
   const snap = (ms: number, ignoreId: string) => {
+    if (!snapOn) return Math.max(0, Math.round(ms));
     const targets = [0, playhead];
     for (const c of [...track, ...audio]) {
       if (c.id === ignoreId) continue;
@@ -193,6 +230,8 @@ export default function EditorView({ openId }: { openId?: string | null }) {
   const onPointerMove = (e: React.PointerEvent) => {
     const drag = dragRef.current;
     if (!drag || !doc) return;
+    const record = !drag.recorded;
+    drag.recorded = true;
     const dMs = (e.clientX - drag.startX) / pxPerMs;
     mutate((d) => {
       if (drag.kind.startsWith("text")) {
@@ -235,42 +274,103 @@ export default function EditorView({ openId }: { openId?: string | null }) {
           c.out_ms = Math.round(Math.max(inMs(o) + 100, o.out_ms + dMs));
         }
       }
-    });
+    }, record);
   };
 
   const grab = (e: React.PointerEvent, drag: NonNullable<Drag>) => {
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragRef.current = drag;
-    setSelected(drag.clipId);
+    setSelectedIds((ids) =>
+      e.shiftKey
+        ? ids.includes(drag.clipId)
+          ? ids.filter((id) => id !== drag.clipId)
+          : [...ids, drag.clipId]
+        : ids.includes(drag.clipId)
+          ? ids // dragging one of a multi-selection keeps the selection
+          : [drag.clipId],
+    );
     setHover(null);
   };
 
-  const splitSelected = () =>
+  // Which video clips do S/Q/W act on: the selection, else the clip under
+  // the playhead — OpenCut's rule.
+  const splitTargets = (d: TimelineDocument): TimelineClip[] => {
+    const clips = d.video_tracks![0];
+    const chosen = clips.filter((c) => selectedIds.includes(c.id));
+    if (chosen.length > 0) return chosen;
+    return clips.filter(
+      (c) => playhead > c.start_ms && playhead < c.start_ms + clipLen(c),
+    );
+  };
+
+  const splitSelected = (retain: "both" | "left" | "right" = "both") =>
     mutate((d) => {
       const clips = d.video_tracks![0];
-      const c = clips.find((x) => x.id === selected);
-      if (!c) return;
-      const offset = playhead - c.start_ms;
-      if (offset <= 100 || offset >= clipLen(c) - 100) return;
-      const right: TimelineClip = {
-        id: crypto.randomUUID(),
-        asset_id: c.asset_id,
-        start_ms: playhead,
-        in_ms: inMs(c) + offset,
-        out_ms: c.out_ms,
-      };
-      c.out_ms = inMs(c) + offset;
-      clips.push(right);
+      for (const c of splitTargets(d)) {
+        const offset = playhead - c.start_ms;
+        if (offset <= 100 || offset >= clipLen(c) - 100) continue;
+        if (retain === "left") {
+          c.out_ms = inMs(c) + offset; // split-right: drop the right side
+        } else if (retain === "right") {
+          c.in_ms = inMs(c) + offset; // split-left: drop the left side
+          c.start_ms = playhead;
+        } else {
+          clips.push({
+            id: crypto.randomUUID(),
+            asset_id: c.asset_id,
+            start_ms: playhead,
+            in_ms: inMs(c) + offset,
+            out_ms: c.out_ms,
+          });
+          c.out_ms = inMs(c) + offset;
+        }
+      }
     });
 
-  const deleteSelected = () =>
+  // ripple=true closes the gap: everything later on EVERY lane shifts left
+  // by the removed span, keeping beds and titles in sync with the cut
+  // (OpenCut's ripple/shift semantics).
+  const deleteSelected = (ripple = false) =>
     mutate((d) => {
-      d.video_tracks![0] = d.video_tracks![0].filter((c) => c.id !== selected);
-      if (d.audio_tracks?.[0]) {
-        d.audio_tracks[0] = d.audio_tracks[0].filter((c) => c.id !== selected);
+      const removedSpans: { start: number; len: number }[] = [];
+      const removing = (id: string) => selectedIds.includes(id);
+      for (const c of d.video_tracks![0]) {
+        if (removing(c.id)) removedSpans.push({ start: c.start_ms, len: clipLen(c) });
       }
-      d.texts = (d.texts ?? []).filter((t) => t.id !== selected);
+      d.video_tracks![0] = d.video_tracks![0].filter((c) => !removing(c.id));
+      if (d.audio_tracks?.[0]) {
+        d.audio_tracks[0] = d.audio_tracks[0].filter((c) => !removing(c.id));
+      }
+      d.texts = (d.texts ?? []).filter((t) => !removing(t.id));
+      if (!ripple) return;
+      for (const span of removedSpans.sort((a, b) => b.start - a.start)) {
+        for (const c of [...d.video_tracks![0], ...(d.audio_tracks?.[0] ?? [])]) {
+          if (c.start_ms >= span.start) c.start_ms -= span.len;
+        }
+        for (const t of d.texts ?? []) {
+          if (t.start_ms >= span.start) {
+            t.start_ms -= span.len;
+            t.end_ms -= span.len;
+          }
+        }
+      }
+    });
+
+  const duplicateSelected = () =>
+    mutate((d) => {
+      const lanes: (TimelineClip | AudioClip)[][] = [
+        d.video_tracks![0],
+        ...(d.audio_tracks?.length ? [d.audio_tracks[0]] : []),
+      ];
+      for (const lane of lanes) {
+        const chosen = lane.filter((c) => selectedIds.includes(c.id));
+        let end = lane.reduce((e, c) => Math.max(e, c.start_ms + clipLen(c)), 0);
+        for (const c of chosen) {
+          lane.push({ ...structuredClone(c), id: crypto.randomUUID(), start_ms: end });
+          end += clipLen(c);
+        }
+      }
     });
 
   const addText = () =>
@@ -368,16 +468,41 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     return () => cancelAnimationFrame(raf);
   }, [playing, totalMs]);
 
+  // Keyboard vocabulary lifted from OpenCut's defaults: space/K play,
+  // J/L seek, arrows frame-step (shift = jump), home/end, S/Q/W splits,
+  // delete (+shift = ripple), ctrl+D duplicate, N snapping, ctrl+Z/Y.
   useEffect(() => {
+    const seek = (deltaMs: number) =>
+      setPlayhead((p) => Math.min(totalMs, Math.max(0, p + deltaMs)));
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Space" && !isTyping(e.target)) {
-        e.preventDefault();
-        setPlaying((p) => !p);
-      }
+      if (isTyping(e.target) || !doc) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      let handled = true;
+      if (mod && key === "z" && e.shiftKey) redo();
+      else if (mod && key === "z") undo();
+      else if (mod && key === "y") redo();
+      else if (mod && key === "d") duplicateSelected();
+      else if (mod) handled = false;
+      else if (e.code === "Space" || key === "k") setPlaying((p) => !p);
+      else if (key === "j") seek(-1000);
+      else if (key === "l") seek(1000);
+      else if (key === "arrowleft") seek(e.shiftKey ? -1000 : -100);
+      else if (key === "arrowright") seek(e.shiftKey ? 1000 : 100);
+      else if (key === "home") setPlayhead(0);
+      else if (key === "end") setPlayhead(totalMs);
+      else if (key === "s") splitSelected("both");
+      else if (key === "q") splitSelected("right"); // split-left: keep right
+      else if (key === "w") splitSelected("left"); // split-right: keep left
+      else if (key === "delete" || key === "backspace") deleteSelected(e.shiftKey);
+      else if (key === "n") setSnapOn((s) => !s);
+      else if (key === "escape") setSelectedIds([]);
+      else handled = false;
+      if (handled) e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  });
 
   // ---- preview: draw the active clip's frame + active texts, no server round-trips
   useEffect(() => {
@@ -481,8 +606,9 @@ export default function EditorView({ openId }: { openId?: string | null }) {
     }
   }, [playhead, playing, audio, media]);
 
-  const selectedText = texts.find((t) => t.id === selected);
-  const selectedAudio = audio.find((c) => c.id === selected);
+  const soleSelected = selectedIds.length === 1 ? selectedIds[0] : null;
+  const selectedText = texts.find((t) => t.id === soleSelected);
+  const selectedAudio = audio.find((c) => c.id === soleSelected);
   const hoverClip = hover ? track.find((c) => c.id === hover.clipId) : undefined;
   const hoverExtras = hoverClip ? extras[hoverClip.asset_id] : undefined;
   const hoverCue =
@@ -529,8 +655,19 @@ export default function EditorView({ openId }: { openId?: string | null }) {
               className="rounded-lg bg-lime-300 px-4 py-2 text-sm font-semibold text-black hover:bg-lime-200">
               Export
             </button>
-            <button onClick={splitSelected} disabled={!selected}
-              className="rounded-lg bg-btn px-3 py-2 text-sm disabled:opacity-40">Split</button>
+            <button onClick={undo} title="Ctrl+Z"
+              className="rounded-lg bg-btn px-3 py-2 text-sm">↩</button>
+            <button onClick={redo} title="Ctrl+Shift+Z"
+              className="rounded-lg bg-btn px-3 py-2 text-sm">↪</button>
+            <button onClick={() => splitSelected("both")} title="S — split at playhead"
+              className="rounded-lg bg-btn px-3 py-2 text-sm">Split</button>
+            <button
+              onClick={() => setSnapOn((s) => !s)}
+              title="N — toggle snapping"
+              className={`rounded-lg px-3 py-2 text-sm ${snapOn ? "bg-accent-soft2 text-accent" : "bg-btn text-ink-muted"}`}
+            >
+              Snap
+            </button>
             <button onClick={addText} className="rounded-lg bg-btn px-3 py-2 text-sm">+ Text</button>
             <select
               value=""
@@ -547,8 +684,14 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                 </option>
               ))}
             </select>
-            <button onClick={deleteSelected} disabled={!selected}
-              className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300 disabled:opacity-40">Delete</button>
+            <button
+              onClick={(e) => deleteSelected(e.shiftKey)}
+              disabled={selectedIds.length === 0}
+              title="Delete · Shift = ripple (close the gap)"
+              className="rounded-lg bg-red-900/50 px-3 py-2 text-sm text-red-300 disabled:opacity-40"
+            >
+              Delete
+            </button>
             <label className="ml-2 text-xs text-ink-muted">
               zoom
               <input type="range" min={0.3} max={3} step={0.1} value={zoom}
@@ -582,7 +725,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                   value={selectedText.text}
                   onChange={(e) =>
                     mutate((d) => {
-                      const t = d.texts!.find((x) => x.id === selected);
+                      const t = d.texts!.find((x) => x.id === soleSelected);
                       if (t) t.text = e.target.value;
                     })
                   }
@@ -601,7 +744,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                       value={selectedAudio.gain ?? 1}
                       onChange={(e) =>
                         mutate((d) => {
-                          const c = d.audio_tracks![0].find((x) => x.id === selected);
+                          const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
                           if (c) c.gain = Number(e.target.value);
                         })
                       }
@@ -613,7 +756,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                       checked={selectedAudio.duck ?? true}
                       onChange={(e) =>
                         mutate((d) => {
-                          const c = d.audio_tracks![0].find((x) => x.id === selected);
+                          const c = d.audio_tracks![0].find((x) => x.id === soleSelected);
                           if (c) c.duck = e.target.checked;
                         })
                       }
@@ -668,7 +811,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                   }}
                   onPointerLeave={() => setHover((h) => (h?.clipId === c.id ? null : h))}
                   className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selected === c.id ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn"
+                    selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn"
                   }`}
                   style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: 4, height: LANE_H - 8 }}
                 >
@@ -683,7 +826,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                 <div key={c.id}
                   onPointerDown={(e) => grab(e, { kind: "audio-move", clipId: c.id, startX: e.clientX, orig: { ...c } })}
                   className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selected === c.id ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
+                    selectedIds.includes(c.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
                   }`}
                   style={{ left: c.start_ms * pxPerMs, width: clipLen(c) * pxPerMs, top: LANE_H + 12, height: LANE_H - 8 }}
                 >
@@ -706,7 +849,7 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                 <div key={t.id}
                   onPointerDown={(e) => grab(e, { kind: "text-move", clipId: t.id, startX: e.clientX, orig: { ...t } })}
                   className={`absolute flex cursor-grab items-center overflow-hidden rounded border px-2 text-xs ${
-                    selected === t.id ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
+                    selectedIds.includes(t.id) ? "border-lime-400 bg-accent-soft2" : "border-edge-strong bg-btn/80"
                   }`}
                   style={{ left: t.start_ms * pxPerMs, width: (t.end_ms - t.start_ms) * pxPerMs, top: (LANE_H + 8) * 2 + 4, height: LANE_H - 8 }}
                 >
@@ -721,6 +864,11 @@ export default function EditorView({ openId }: { openId?: string | null }) {
                 style={{ left: playhead * pxPerMs }} />
             </div>
           </div>
+          <p className="text-[11px] text-ink-faint">
+            space/K play · J/L ±1s · ←/→ step (shift jump) · S split · Q/W trim to playhead ·
+            del delete (shift = ripple) · ctrl+D duplicate · ctrl+Z/Y undo/redo · N snap ·
+            shift-click multi-select · esc deselect
+          </p>
           {hover && hoverClip && hoverCue && hoverExtras?.sprite && (
             <div
               className="pointer-events-none fixed z-50 -translate-x-1/2 overflow-hidden rounded-lg border border-edge-strong shadow-lg"
