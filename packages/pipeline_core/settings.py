@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # Prompt enhancement (M18): path to the Qwen3.5-4B GGUF; empty -> the
     # deterministic heuristic enhancer is used.
     qwen_model_path: str = ""
+    # Ollama (Mac-friendly alternative for prompt enhancement / reverse
+    # prompting): point at a running server, e.g. http://127.0.0.1:11434.
+    # Takes precedence over qwen_model_path when set.
+    ollama_url: str = ""
+    ollama_model: str = "qwen3:4b"
 
     # Dev engines (DEV_ENGINES=1): placeholder TTS/lipsync/generation so the
     # full pipeline runs end-to-end on machines without CUDA (Apple Silicon,

@@ -28,11 +28,27 @@ def _comfy_online(settings: Settings) -> bool:
         return False
 
 
+def _ollama_online(settings: Settings) -> bool:
+    """Same live-vs-configured distinction as ComfyUI: /api/tags answers
+    only when an Ollama server is actually up."""
+    if not settings.ollama_url:
+        return False
+    try:
+        import httpx
+
+        response = httpx.get(f"{settings.ollama_url.rstrip('/')}/api/tags", timeout=1.5)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
 @router.get("/config")
 async def config_status() -> dict[str, bool]:
     settings = Settings()
     return {
         "comfy_online": _comfy_online(settings),
+        "ollama_online": _ollama_online(settings),
+        "ollama_configured": bool(settings.ollama_url),
         "dev_engines": bool(settings.dev_engines),
         "comfy_configured": bool(settings.comfy_url),
         "fal_configured": bool(settings.fal_api_key),

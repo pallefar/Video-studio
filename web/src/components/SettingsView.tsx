@@ -3,6 +3,8 @@ import { poll } from "../lib";
 
 interface ConfigStatus {
   comfy_online: boolean;
+  ollama_online: boolean;
+  ollama_configured: boolean;
   dev_engines: boolean;
   comfy_configured: boolean;
   fal_configured: boolean;
@@ -145,6 +147,29 @@ export default function SettingsView() {
                   </td>
                 </tr>
               )}
+              <tr>
+                <td className="px-4 py-3">Ollama (prompt enhancement)</td>
+                <td className="px-4 py-3">
+                  {config ? (
+                    config.ollama_online ? (
+                      <span className="chip-emerald rounded px-2 py-0.5 text-xs">online</span>
+                    ) : config.ollama_configured ? (
+                      <span className="chip-amber rounded px-2 py-0.5 text-xs">configured · offline</span>
+                    ) : (
+                      <span className="chip-neutral rounded px-2 py-0.5 text-xs">not set</span>
+                    )
+                  ) : (
+                    "…"
+                  )}
+                </td>
+                <td className="px-4 py-3 text-xs text-ink-faint">
+                  {config && !config.ollama_configured
+                    ? "ollama serve + set OLLAMA_URL=http://127.0.0.1:11434"
+                    : config && !config.ollama_online
+                      ? "configured but unreachable — is ollama running?"
+                      : ""}
+                </td>
+              </tr>
               {CONFIG_ROWS.map(([key, label, hint]) => (
                 <tr key={key}>
                   <td className="px-4 py-3">{label}</td>

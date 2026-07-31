@@ -147,3 +147,73 @@ def test_apply_enhancement_preserves_existing_params():
     assert params["seed"] == 7
     assert params["prompt_raw"] == "a fox"
     assert prompt.startswith("a fox")
+
+
+# --- Ollama enhancer backend -------------------------------------------------
+
+
+def test_ollama_enhancer_uses_chat_response(monkeypatch):
+    from pipeline_core.enhance import OllamaEnhancer
+
+    seen = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"message": {"content": "  a vivid rewritten prompt  "}}
+
+    def fake_post(url, json=None, timeout=None):
+        seen["url"] = url
+        seen["body"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    enhancer = OllamaEnhancer("http://ollama-host:11434/", "qwen3:4b")
+    assert enhancer.enhance("a cat") == "a vivid rewritten prompt"
+    assert seen["url"] == "http://ollama-host:11434/api/chat"
+    assert seen["body"]["model"] == "qwen3:4b"
+    assert seen["body"]["stream"] is False
+    assert seen["body"]["messages"][1]["content"] == "a cat"
+
+
+def test_ollama_enhancer_degrades_to_heuristic_on_error(monkeypatch):
+    from pipeline_core.enhance import HeuristicEnhancer, OllamaEnhancer
+
+    def boom(*args, **kwargs):
+        raise ConnectionError("server stopped")
+
+    monkeypatch.setattr("httpx.post", boom)
+    enhancer = OllamaEnhancer("http://127.0.0.1:11434", "qwen3:4b")
+    # a stopped Ollama must never break a generation request
+    assert enhancer.enhance("a cat") == HeuristicEnhancer().enhance("a cat")
+
+
+def test_get_enhancer_prefers_configured_ollama(monkeypatch):
+    import pipeline_core.enhance as enhance
+
+    monkeypatch.setenv("OLLAMA_URL", "http://127.0.0.1:11434")
+    monkeypatch.setattr(enhance, "_enhancer", None)
+    assert enhance.get_enhancer().name == "ollama"
+    # reset so other tests get the default heuristic
+    enhance._enhancer = None
+
+
+def test_config_reports_ollama_flags(client, monkeypatch):
+    monkeypatch.delenv("OLLAMA_URL", raising=False)
+    body = client.get("/config").json()
+    assert body["ollama_configured"] is False
+    assert body["ollama_online"] is False
+
+    monkeypatch.setenv("OLLAMA_URL", "http://ollama-host:11434")
+
+    class FakeResponse:
+        status_code = 200
+
+    monkeypatch.setattr("httpx.get", lambda url, timeout: FakeResponse())
+    body = client.get("/config").json()
+    assert body["ollama_configured"] is True
+    assert body["ollama_online"] is True

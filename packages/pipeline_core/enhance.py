@@ -56,6 +56,49 @@ class HeuristicEnhancer:
         return enhanced
 
 
+SYSTEM_PROMPT = (
+    "Rewrite the user's video-generation prompt to be vivid and specific: "
+    "subject, motion, lighting, lens, mood. One paragraph, no preamble."
+)
+
+
+class OllamaEnhancer:
+    """Ollama /api/chat — the Mac-friendly enhancer backend (no GGUF
+    download, no llama-cpp build). Degrades to the heuristic on any server
+    error so a stopped Ollama never breaks a generation request."""
+
+    name = "ollama"
+
+    def __init__(self, url: str, model: str):
+        self._url = url.rstrip("/")
+        self._model = model
+        self._fallback = HeuristicEnhancer()
+
+    def enhance(self, prompt: str) -> str:
+        import httpx
+
+        try:
+            response = httpx.post(
+                f"{self._url}/api/chat",
+                json={
+                    "model": self._model,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": False,
+                },
+                timeout=120,
+            )
+            response.raise_for_status()
+            content = response.json()["message"]["content"].strip()
+            if content:
+                return content
+        except Exception as exc:
+            log.warning("ollama_enhance_failed", error=str(exc))
+        return self._fallback.enhance(prompt)
+
+
 class QwenEnhancer:
     """Qwen3.5-4B GGUF via llama-cpp-python (CPU). Loads once per process."""
 
@@ -88,16 +131,23 @@ _enhancer: PromptEnhancer | None = None
 
 
 def get_enhancer() -> PromptEnhancer:
+    """Priority: Ollama (explicitly configured server) > Qwen GGUF
+    ([enhance] extra + QWEN_MODEL_PATH) > deterministic heuristic."""
     global _enhancer
     if _enhancer is None:
-        try:
-            import llama_cpp  # noqa: F401
-            from pipeline_core.settings import Settings
+        from pipeline_core.settings import Settings
 
-            model_path = getattr(Settings(), "qwen_model_path", "")
-            _enhancer = QwenEnhancer(model_path) if model_path else HeuristicEnhancer()
-        except ImportError:
-            _enhancer = HeuristicEnhancer()
+        settings = Settings()
+        if settings.ollama_url:
+            _enhancer = OllamaEnhancer(settings.ollama_url, settings.ollama_model)
+        else:
+            try:
+                import llama_cpp  # noqa: F401
+
+                model_path = settings.qwen_model_path
+                _enhancer = QwenEnhancer(model_path) if model_path else HeuristicEnhancer()
+            except ImportError:
+                _enhancer = HeuristicEnhancer()
         log.info("prompt_enhancer_selected", enhancer=_enhancer.name)
     return _enhancer
 
