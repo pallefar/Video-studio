@@ -15,6 +15,11 @@ cd "$(dirname "$0")/.."
 
 export DEV_ENGINES="${DEV_ENGINES:-1}"
 
+# macOS: RQ forks a work-horse per job; newer Darwin kills the fork when
+# Objective-C classes initialize post-fork (instant signal-6 job failures).
+# Standard mitigation for forking workers on macOS.
+[ "$(uname -s)" = "Darwin" ] && export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+
 echo "==> infrastructure (postgres, redis, minio)"
 docker compose up -d --wait
 
@@ -55,7 +60,16 @@ $PY worker_gpu/run.py &
 PIDS+=($!)
 
 echo "==> wan-lane worker (generation queue)"
-$PY worker_gpu/run_wan.py &
+# M30: a configured ComfyUI (COMFY_URL in env or .env) means the wan lane
+# does REAL generation — on a Mac that's the MPS-sized wan2.1-t2v-1.3b.
+# Dev engines stay on for the render lane only (voice/lipsync placeholders).
+WAN_DEV_ENGINES="$DEV_ENGINES"
+COMFY_CONFIGURED="${COMFY_URL:-$(grep -E '^COMFY_URL=.+' .env 2>/dev/null | head -1 | cut -d= -f2-)}"
+if [ -n "$COMFY_CONFIGURED" ]; then
+  WAN_DEV_ENGINES=0
+  echo "    COMFY_URL configured ($COMFY_CONFIGURED) — wan lane generates for real"
+fi
+DEV_ENGINES="$WAN_DEV_ENGINES" $PY worker_gpu/run_wan.py &
 PIDS+=($!)
 
 echo "==> panel :5173"

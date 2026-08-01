@@ -45,3 +45,21 @@ def test_stage_keys_are_idempotent_and_segment_scoped():
     assert stage_key(job_id, "tts", 3) == f"{job_id}-tts-3"
     assert stage_key(job_id, "tts", 3) != stage_key(job_id, "tts", 4)
     assert stage_key(job_id, "tts") != stage_key(job_id, "lipsync")
+
+
+def test_enqueued_jobs_outlive_rq_default_timeout(redis_url):
+    """RQ's 180 s default would kill any real render/generation (MPS sampling,
+    14B wan clips, overnight LoRA). Stages bound their own execution; the RQ
+    timeout is a last-resort net and must sit far above them."""
+    from rq.job import Job
+
+    from pipeline_core.dispatch import DEFAULT_JOB_TIMEOUT_S, Dispatcher
+    from pipeline_core.settings import Settings
+
+    assert DEFAULT_JOB_TIMEOUT_S >= 3600  # >= COMFY_TIMEOUT_S's default
+
+    dispatcher = Dispatcher(Settings(redis_url=redis_url))
+    dispatcher.enqueue(QUEUE_WAN, "worker_gpu.stages.generation_stage_local",
+                       "gen-id", job_key="gen-timeout-probe")
+    job = Job.fetch("gen-timeout-probe", connection=dispatcher.redis)
+    assert job.timeout == DEFAULT_JOB_TIMEOUT_S

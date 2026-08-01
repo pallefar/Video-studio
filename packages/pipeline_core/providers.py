@@ -90,6 +90,10 @@ class LocalWanProvider:
             ModelSpec(self.name, "wan2.2-t2v", frozenset({GenerationKind.text_to_video}), CLASS_LOCAL, est_cost=0.0),
             ModelSpec(self.name, "wan2.2-i2v", frozenset({GenerationKind.image_to_video}), CLASS_LOCAL, est_cost=0.0),
             ModelSpec(self.name, "wan2.2-fun-camera", video, CLASS_LOCAL, "camera presets, M11", est_cost=0.0),
+            # M30: the Mac-class t2v — small enough for Apple Silicon MPS
+            # (native ComfyUI nodes, no WanVideoWrapper), same lane and gates.
+            ModelSpec(self.name, "wan2.1-t2v-1.3b", frozenset({GenerationKind.text_to_video}),
+                      CLASS_LOCAL, "fast/Mac-class t2v, M30 (Apache 2.0)", est_cost=0.0),
             # Advanced mode (M11): Uni3C custom trajectories re-film a still;
             # ReCamMaster re-shoots existing footage with a new camera move.
             ModelSpec(self.name, "uni3c", frozenset({GenerationKind.image_to_video}),

@@ -27,8 +27,8 @@ from schema.models import Generation, GenerationKind
 
 COMFY_MODELS = [
     "wan2.2-t2v", "wan2.2-i2v", "wan2.2-fun-camera", "wan2.2-vace-fun",
-    "wan2.1-vace-1.3b", "z-image-turbo", "qwen-image", "sdxl", "ace-step",
-    "musetalk-image", "chatterbox", "uni3c", "recammaster",
+    "wan2.1-vace-1.3b", "wan2.1-t2v-1.3b", "z-image-turbo", "qwen-image",
+    "sdxl", "ace-step", "musetalk-image", "chatterbox", "uni3c", "recammaster",
 ]
 
 

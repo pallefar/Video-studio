@@ -313,3 +313,20 @@ alone for social posting.
 - [x] Audio tab engine pickers (local vs ElevenLabs with price), ElevenLabs voice-id field; Settings ElevenLabs row; `.env.example` + Settings drift guard holds
 
 **Accept:** `pytest tests/test_comfy.py tests/test_providers.py` — manifest audit, install-script drift guard, `/config/comfy` missing-pack detection, ElevenLabs adapter (headers/clamps/costs) and cpu-lane routing ✅ (2026-07-31; node packs installed into the live ComfyUI, Settings verified in-browser)
+
+## M30 — macOS live generation (the Mac milestone)
+
+*The workstation milestones above stay exactly as they are — this milestone
+makes THIS machine (Apple Silicon, 18 GB unified memory, no CUDA) generate
+real video with an honestly-sized model, so the whole app is testable end to
+end without the 3090 and without an API key. Everything runs through the same
+wan lane, compliance gates, and asset pipeline as the workstation path.*
+
+- [x] ComfyUI native on Apple Silicon via `scripts/install_comfyui.sh` — MPS torch (no `--cpu`), `/system_stats` reachable, Settings shows online *(ComfyUI 0.29.0, torch 2.13, devices=[mps], all 6 node packs imported)*
+- [x] Model roster for 18 GB: **Wan2.1-T2V-1.3B fp16** (Apache-2.0, Comfy-Org repackage, 2.8 GB) + **umt5-xxl GGUF Q5_K_M** text encoder (4.2 GB, city96) + Wan 2.1 VAE — `wan2.1-t2v-1.3b` ModelSpec + native-node template (UNETLoader / CLIPLoaderGGUF / ModelSamplingSD3; deliberately no WanVideoWrapper — those nodes are CUDA-first, native nodes run on MPS)
+- [x] `dev_up.sh`: when COMFY_URL is configured the wan lane starts with real generation (DEV_ENGINES stays on for the render lane's voice/lipsync placeholders only); on Darwin exports `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` — without it every forked RQ work-horse dies instantly (signal 6, post-fork ObjC initialization)
+- [x] Real text-to-video clip generated end to end on this Mac: prompt → wan lane → ComfyUI (MPS) → Asset with `origin='generated'`, playable H.264 in the panel *(2026-08-01: 640×384, 25 frames @ 16 fps, 20 uni_pc steps at ~19 s/step — ~13 min wall-clock; ffprobe-verified h264 from both ComfyUI and the MinIO asset copy. The trap: 832×480×33 blows past 18 GB unified memory — step time collapsed 63 s → 2056 s in swap; 640×384×25 is the Mac-viable canvas. Found and fixed on the way: RQ's 180 s default job timeout killed real renders — Dispatcher now enqueues with a 12 h last-resort net, tests/test_queue_topology.py)*
+
+**Accept:** `pytest tests/test_comfy.py tests/test_providers.py` green, and a generation submitted through the studio completes with a real (non-placeholder) clip on Apple Silicon ✅ (2026-08-01, asset `738a5389` from generation `18c53a24`)
+
+*Rented-GPU escape hatch (same lane, no code changes): `scripts/vast_comfyui.sh` bootstraps a vast.ai CUDA box as the wan-lane executor over an SSH tunnel — docs/mac-dev.md.*
