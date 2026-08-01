@@ -51,13 +51,17 @@ and every compliance rule.
 - Alternatively: set `FAL_API_KEY` in `.env` and the `fal` provider appears
   in every engine picker — generations then execute for real via the API
   (network jobs on the CPU lane), no GPU needed.
-- Or rent a GPU: `scripts/vast_comfyui.sh` bootstraps a vast.ai (or any
-  Ubuntu + CUDA) instance as the wan-lane executor — ComfyUI + node packs +
+- Or rent a GPU: `scripts/rent_gpu.sh` shows which rental providers are
+  set up on this machine (vast.ai, RunPod, Lambda, TensorDock), what keys
+  are missing, and — with `--offers` — live RTX-3090-class prices.
+  `scripts/vast_comfyui.sh` then bootstraps the rented box (any provider:
+  Ubuntu + CUDA + SSH) as the wan-lane executor — ComfyUI + node packs +
   the proven model roster. Connect with an SSH tunnel
-  (`ssh -p <port> root@<host> -N -L 8188:localhost:8188`) and keep
+  (`ssh -p <port> <user>@<host> -N -L 8188:localhost:8188`) and keep
   `COMFY_URL=http://127.0.0.1:8188`; never expose port 8188 publicly,
   ComfyUI has no auth. Restart the API + wan worker and generations run
-  on the rented card.
+  on the rented card. Rental API keys live in env only — they are
+  deliberately not studio Settings.
 
 ## Manual startup (what the script does)
 

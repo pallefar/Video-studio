@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Bootstrap a rented GPU box (vast.ai or any Ubuntu + CUDA host) as the
-# studio's wan-lane executor: ComfyUI + node packs + the model roster for
-# the shipped, schema-verified template (wan2.1-t2v-1.3b).
+# Bootstrap a rented GPU box as the studio's wan-lane executor: ComfyUI +
+# node packs + the model roster for the shipped, schema-verified template
+# (wan2.1-t2v-1.3b). Provider-agnostic despite the name — vast.ai, RunPod,
+# Lambda, TensorDock: anything Ubuntu + CUDA + SSH. Which provider is set
+# up on your machine: scripts/rent_gpu.sh.
 #
 # Run ON the instance (root or sudo-capable user):
 #
