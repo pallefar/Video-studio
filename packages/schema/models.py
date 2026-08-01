@@ -857,6 +857,22 @@ class TimelineDocRead(TimelineDocBase):
     updated_at: datetime
 
 
+class RentalProviderStatus(BaseModel):
+    """Live status of one GPU-rental provider (GET /rentals). Configured
+    means a key is present in env; online means the provider's API answered
+    the usage probe. Money fields are None when the provider doesn't expose
+    them (or the probe is offline)."""
+
+    name: str
+    label: str
+    configured: bool
+    online: bool = False
+    balance_usd: Optional[float] = None
+    running_instances: Optional[int] = None
+    burn_usd_per_hr: Optional[float] = None
+    note: Optional[str] = None
+
+
 class TimelineDocSave(BaseModel):
     doc: TimelineDocument
     base_version: int
@@ -913,4 +929,5 @@ EXPORTED_MODELS: list[type[SQLModel] | type[BaseModel]] = [
     TimelineDocCreate,
     TimelineDocRead,
     TimelineDocSave,
+    RentalProviderStatus,
 ]

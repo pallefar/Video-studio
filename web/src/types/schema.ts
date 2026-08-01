@@ -361,3 +361,14 @@ export interface TimelineDocSave {
   doc: TimelineDocument;
   base_version: number;
 }
+
+export interface RentalProviderStatus {
+  name: string;
+  label: string;
+  configured: boolean;
+  online?: boolean;
+  balance_usd?: number | null;
+  running_instances?: number | null;
+  burn_usd_per_hr?: number | null;
+  note?: string | null;
+}

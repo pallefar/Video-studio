@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { poll } from "../lib";
 import { Sparkline } from "./charts";
+import type { RentalProviderStatus } from "../types/schema";
 
 interface Stats {
   assets: { total: number; approved: number; by_origin: Record<string, number> };
@@ -82,6 +83,14 @@ function Tile({
 
 export default function DashboardView({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [rentals, setRentals] = useState<RentalProviderStatus[]>([]);
+
+  useEffect(() => {
+    fetch("/rentals")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((all: RentalProviderStatus[]) => setRentals(all.filter((p) => p.configured)))
+      .catch(() => undefined);
+  }, []);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [trends, setTrends] = useState<Record<string, MetricRow[]>>({});
   const [error, setError] = useState<string | null>(null);
@@ -183,6 +192,45 @@ export default function DashboardView({ onNavigate }: { onNavigate?: (tab: strin
           }
         />
       </div>
+
+      {rentals.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-lg font-semibold tracking-tight text-ink">
+            Rented GPUs
+            <span className="ml-2 text-sm font-normal text-ink-muted">
+              live from each provider's API — an instance left running is money burning
+            </span>
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {rentals.map((provider) => (
+              <div key={provider.name} className="rounded-2xl border border-edge bg-surface p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+                    {provider.label}
+                  </p>
+                  {(provider.burn_usd_per_hr ?? 0) > 0 && (
+                    <span className="chip-amber rounded px-1.5 py-0.5 text-[10px] font-semibold">
+                      burning
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xl font-bold tracking-tight">
+                  {provider.online
+                    ? provider.balance_usd != null
+                      ? `$${provider.balance_usd.toFixed(2)}`
+                      : `${provider.running_instances ?? 0} running`
+                    : "unreachable"}
+                </p>
+                <p className="text-xs text-ink-muted">
+                  {provider.online
+                    ? `${provider.running_instances ?? 0} running · $${(provider.burn_usd_per_hr ?? 0).toFixed(3)}/hr`
+                    : provider.note}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {activeTrends.length > 0 && (
         <section>

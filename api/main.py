@@ -18,6 +18,7 @@ from api.routes import (
     projects,
     prompts,
     publish,
+    rentals,
     stats,
     storyboards,
     timelines,
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(stats.router)
     app.include_router(config.router)
     app.include_router(publish.router)
+    app.include_router(rentals.router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

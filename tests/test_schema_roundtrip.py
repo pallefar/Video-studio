@@ -35,6 +35,7 @@ from schema.models import (
     TimelineClip,
     TimelineDocCreate,
     TimelineDocRead,
+    RentalProviderStatus,
     TimelineDocSave,
     TimelineDocument,
     BaseLoopCreate,
@@ -208,6 +209,15 @@ SAMPLES = {
         "updated_at": utcnow(),
     },
     TimelineDocSave: {"doc": {}, "base_version": 3},
+    RentalProviderStatus: {
+        "name": "vast",
+        "label": "vast.ai",
+        "configured": True,
+        "online": True,
+        "balance_usd": 12.34,
+        "running_instances": 1,
+        "burn_usd_per_hr": 0.099,
+    },
 }
 
 

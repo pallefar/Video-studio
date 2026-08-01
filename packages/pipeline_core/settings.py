@@ -66,3 +66,13 @@ class Settings(BaseSettings):
     comfy_url: str = ""
     comfy_poll_interval_s: float = 2.0
     comfy_timeout_s: int = 3600
+
+    # GPU rental providers (scripts/rent_gpu.sh): a configured key lights
+    # the provider up in Settings and enables the /rentals usage probe
+    # (balance, running instances, burn rate). Read from env like every
+    # credential — the API never stores or returns key values.
+    vast_api_key: str = ""
+    runpod_api_key: str = ""
+    lambda_api_key: str = ""
+    tensordock_api_key: str = ""
+    tensordock_api_token: str = ""

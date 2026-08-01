@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { poll } from "../lib";
+import type { RentalProviderStatus } from "../types/schema";
 
 interface ConfigStatus {
   comfy_online: boolean;
@@ -51,6 +52,14 @@ export default function SettingsView() {
   const [config, setConfig] = useState<ConfigStatus | null>(null);
   const [comfy, setComfy] = useState<ComfyDetail | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [rentals, setRentals] = useState<RentalProviderStatus[] | null>(null);
+
+  useEffect(() => {
+    fetch("/rentals")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setRentals)
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     fetch("/config")
@@ -196,6 +205,52 @@ export default function SettingsView() {
           Values live in .env and are never shown here — this view only reports what is
           configured.
         </p>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-lg font-semibold tracking-tight">
+          GPU rentals
+          <span className="ml-2 text-sm font-normal text-ink-muted">
+            remote wan-lane executors — scripts/rent_gpu.sh
+          </span>
+        </h2>
+        <div className="overflow-hidden rounded-2xl border border-edge bg-surface">
+          <table className="w-full text-left text-sm">
+            <tbody className="divide-y divide-edge-soft">
+              {(rentals ?? []).map((provider) => (
+                <tr key={provider.name}>
+                  <td className="px-4 py-3">{provider.label}</td>
+                  <td className="px-4 py-3">
+                    {provider.online ? (
+                      <span className="chip-emerald rounded px-2 py-0.5 text-xs">online</span>
+                    ) : provider.configured ? (
+                      <span className="chip-amber rounded px-2 py-0.5 text-xs">configured · unreachable</span>
+                    ) : (
+                      <span className="chip-neutral rounded px-2 py-0.5 text-xs">not set</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    {provider.online ? (
+                      <span className="text-ink-soft">
+                        {provider.balance_usd != null && `$${provider.balance_usd.toFixed(2)} credit · `}
+                        {provider.running_instances ?? 0} running
+                        {(provider.burn_usd_per_hr ?? 0) > 0 &&
+                          ` · $${provider.burn_usd_per_hr!.toFixed(3)}/hr burning`}
+                      </span>
+                    ) : (
+                      <span className="text-ink-faint">{provider.note}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {rentals === null && (
+                <tr>
+                  <td className="px-4 py-3 text-ink-faint">…</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section>
