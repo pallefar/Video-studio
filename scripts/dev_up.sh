@@ -13,6 +13,32 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# A start is also an upgrade: fast-forward to the branch's latest commits and
+# refresh deps when their manifests changed, so the stack always runs what is
+# committed. Skipped when the tree has local edits (never clobber work in
+# progress); NO_UPDATE=1 skips entirely; a failed pull (offline) starts the
+# local version instead of blocking.
+if [ "${NO_UPDATE:-0}" != 1 ]; then
+  if git diff --quiet && git diff --cached --quiet; then
+    echo "==> self-update (NO_UPDATE=1 to skip)"
+    before=$(git rev-parse HEAD)
+    git pull --ff-only 2>/dev/null || echo "    !! pull failed (offline?) — starting the local version"
+    if [ "$(git rev-parse HEAD)" != "$before" ]; then
+      git --no-pager log --oneline "$before..HEAD" | sed 's/^/    + /'
+      if [ -d .venv ] && ! git diff --quiet "$before" HEAD -- pyproject.toml; then
+        echo "==> pyproject.toml changed — refreshing venv"
+        ./.venv/bin/pip install -q -e ".[dev]"
+      fi
+      if [ -d web/node_modules ] && ! git diff --quiet "$before" HEAD -- web/package-lock.json; then
+        echo "==> web lockfile changed — npm ci"
+        (cd web && npm ci --silent)
+      fi
+    fi
+  else
+    echo "==> local edits present — skipping self-update"
+  fi
+fi
+
 export DEV_ENGINES="${DEV_ENGINES:-1}"
 
 # macOS: RQ forks a work-horse per job; newer Darwin kills the fork when
