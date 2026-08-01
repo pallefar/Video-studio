@@ -49,6 +49,24 @@ export default function LibraryView() {
     fetch(`/assets/${id}/${action}`, { method: "POST" }).then(refresh);
   };
 
+  const [playing, setPlaying] = useState<{ asset: AssetRead; url: string; kind: "video" | "audio" } | null>(null);
+
+  const mediaKind = (uri: string): "video" | "audio" | null => {
+    const ext = uri.split(".").pop()?.toLowerCase() ?? "";
+    if (["mp4", "mov", "webm", "mkv"].includes(ext)) return "video";
+    if (["mp3", "wav", "flac", "m4a", "ogg"].includes(ext)) return "audio";
+    return null;
+  };
+
+  const play = (asset: AssetRead) => {
+    const kind = mediaKind(asset.uri);
+    if (!kind || !asset.id) return;
+    fetch(`/assets/${asset.id}/download`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
+      .then(({ url }) => setPlaying({ asset, url, kind }))
+      .catch(() => toast("Could not load the media URL", "error"));
+  };
+
   const toggleFx = (id: string) =>
     setFxSelected((current) =>
       current.includes(id)
@@ -134,6 +152,26 @@ export default function LibraryView() {
       )}
       {notice && <p className="mb-4 text-sm text-success">{notice}</p>}
 
+      {playing && (
+        <div className="mb-4 rounded-2xl border border-lime-300/30 bg-surface2 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm text-ink-soft">
+              Playing <span className="text-ink">{playing.asset.caption ?? playing.asset.uri}</span>
+            </p>
+            <button
+              onClick={() => setPlaying(null)}
+              className="rounded bg-btn px-3 py-1 text-xs hover:bg-btn-hover"
+            >
+              Close
+            </button>
+          </div>
+          {playing.kind === "video" ? (
+            <video src={playing.url} controls autoPlay className="max-h-[420px] w-full rounded bg-black" />
+          ) : (
+            <audio src={playing.url} controls autoPlay className="w-full" />
+          )}
+        </div>
+      )}
       {fxTarget && (
         <div className="mb-4 rounded-2xl border border-lime-300/30 bg-surface2 p-4">
           <p className="mb-2 text-sm text-ink-soft">
@@ -228,6 +266,15 @@ export default function LibraryView() {
                 </td>
                 <td className="px-4 py-3">{asset.approved ? "✓" : "—"}</td>
                 <td className="px-4 py-3">
+                  {mediaKind(asset.uri) && (
+                    <button
+                      onClick={() => play(asset)}
+                      className="mr-2 rounded bg-accent-soft px-3 py-1 text-xs text-accent hover:bg-accent-soft2"
+                      title="Play in place — presigned straight from the bucket"
+                    >
+                      Play
+                    </button>
+                  )}
                   <button
                     onClick={() =>
                       fetch(`/assets/${asset.id}/ingest`, { method: "POST" }).then((r) => {
