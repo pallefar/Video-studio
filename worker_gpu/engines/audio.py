@@ -75,6 +75,37 @@ def write_project_wav(ffmpeg_bin: str, src: Path, dst: Path) -> Path:
     return dst
 
 
+def loop_frame_offset(start_ms: float, fps: float, frame_count: int) -> int:
+    """The base-loop frame index a window beginning at `start_ms` should
+    start rendering from.
+
+    THIS IS THE SINGLE POINT WHERE A VISIBLE CHUNK SEAM IS CREATED OR
+    AVOIDED. `chunk_windows()` (packages/pipeline_core/chunking.py) produces
+    contiguous windows whose ends chain — window N's end is window N+1's
+    start — which is exactly what makes a pure, modular frame-offset
+    function possible: chunk N+1's offset equals `(chunk N's offset +
+    frames rendered in chunk N) % frame_count`. A per-chunk reset to frame 0
+    (the dev engine's behaviour, correct only for a static placeholder
+    avatar) would break that chaining and produce a visible jump at every
+    chunk boundary once real lip-sync is driving the loop.
+
+    `frame_count` must be the BaseLoop's stored value, not a probe of the
+    source file: M2's ping-pong seam handling swaps `source_uri` for a
+    forward-plus-reverse variant and doubles `frame_count`, and the stored
+    value is the authoritative one for the file actually referenced.
+
+    Rounds (rather than truncates) the frame position so consecutive
+    windows do not accumulate a drift of a fraction of a frame per chunk —
+    the offset is always recomputed fresh from the absolute `start_ms`,
+    never accumulated step by step across chunks, so there is nothing to
+    drift.
+    """
+    if frame_count <= 0:
+        raise ValueError("frame_count must be positive")
+    frames = round(start_ms * fps / 1000)
+    return frames % frame_count
+
+
 def build_window_audio(
     ffmpeg_bin: str,
     store: ObjectStore,

@@ -38,12 +38,14 @@ from pipeline_core.settings import Settings
 from pipeline_core.storage import ObjectStore
 from worker_cpu.ffmpeg.assemble import chunk_keys_for_job
 from worker_cpu.ffmpeg.ingest import probe
+from pipeline_core.chunking import chunk_windows
 from worker_gpu.engines.audio import (
     PROJECT_CHANNELS,
     PROJECT_SAMPLE_RATE,
     build_window_audio,
     find_ffmpeg,
     lipsync_chunk_key,
+    loop_frame_offset,
     tts_segment_key,
     write_project_wav,
 )
@@ -480,6 +482,114 @@ def test_dev_engines_produce_the_keys_audio_py_defines(ffmpeg_bin, engine, loop,
         chunk_uri = lipsync_engine.sync_chunk("job-x", str(loop.id), 0, 1000)
         _, chunk_key = store.parse_uri(chunk_uri)
         assert chunk_key == lipsync_chunk_key("job-x", 0, 1000)
+
+
+# ---------------------------------------------------------------------------
+# 01-05 Task 1: worker_gpu/engines/audio.py::loop_frame_offset — the
+# frame-continuity arithmetic that keeps consecutive lip-sync chunks from
+# jumping back to the base loop's opening frame.
+#
+# Tests 1-4 are pure arithmetic and need nothing but the function itself.
+# Tests 5-6 from the plan (a chunk whose key already exists is skipped on
+# re-render; `sync_chunk` reuses one prepared-loop memo across windows)
+# describe `MuseTalkEngine.sync_chunk` behaviour. That method is still the
+# bare `raise NotImplementedError("M3")` stub 01-03 left it as — 01-03 never
+# implemented the early-return-on-existing-key or the prepared-loop memo
+# this plan's <action> assumed were already there. Wiring `loop_frame_offset`
+# into `sync_chunk` would mean writing that surrounding orchestration for
+# the first time, which is engine implementation, not offset wiring — out of
+# scope here per plan 01-05's own read_first on 01-01 Task 4 (the one-way
+# torch/mmlab decision this project is deliberately deferring to the
+# workstation session). Tests 5-6 are deferred to that session; see
+# 01-05-SUMMARY.md.
+# ---------------------------------------------------------------------------
+
+
+def test_loop_frame_offset_starts_at_zero_and_wraps_modulo_frame_count():
+    """Test 1: offset 0 at the loop's own start, 0 again after exactly one
+    full loop, and the documented mid-loop value — the acceptance
+    criterion's own arithmetic, pinned exactly."""
+    assert loop_frame_offset(0, 25.0, 250) == 0
+    assert loop_frame_offset(10_000, 25.0, 250) == 0  # exactly one 10s loop
+    assert loop_frame_offset(4_000, 25.0, 250) == 100
+    assert loop_frame_offset(14_000, 25.0, 250) == 100  # one loop plus 4s
+
+
+def test_loop_frame_offset_chains_across_contiguous_windows():
+    """Test 2: for contiguous windows from `chunk_windows`, the offset of
+    window N+1 equals `(offset of window N + frames rendered in window N) %
+    frame_count` — the seam-free property. Window/frame-count values are
+    chosen so frames-per-window is NOT a multiple of frame_count, so this
+    assertion actually distinguishes real modular arithmetic from a
+    constant-0 stub (see the mutation check below)."""
+    fps, frame_count = 25.0, 250  # a 10 s base loop
+    spans = [37_000] * 7  # 259 s total, packs into windows of 74s/74s/74s/37s
+    windows = chunk_windows(spans)
+    assert len(windows) > 1  # otherwise there is no boundary to chain across
+
+    for (start, end), (next_start, _) in zip(windows, windows[1:]):
+        assert next_start == end  # chunk_windows' chaining precondition
+        frames_rendered = round((end - start) * fps / 1000)
+        assert frames_rendered % frame_count != 0  # test would be vacuous otherwise
+        expected = (loop_frame_offset(start, fps, frame_count) + frames_rendered) % frame_count
+        assert loop_frame_offset(next_start, fps, frame_count) == expected
+
+
+def test_loop_frame_offset_chaining_fails_under_constant_zero_mutation():
+    """Same chaining property as above, but explicitly demonstrating (not
+    merely asserting) that a `loop_frame_offset` replaced by a constant 0
+    fails it — the plan's required mutation check, executed and observed
+    rather than argued from that changes are restored immediately after."""
+    fps, frame_count = 25.0, 250
+    spans = [37_000] * 7
+    windows = chunk_windows(spans)
+
+    def constant_zero_offset(start_ms, fps, frame_count):
+        return 0
+
+    failures = 0
+    for (start, end), (next_start, _) in zip(windows, windows[1:]):
+        frames_rendered = round((end - start) * fps / 1000)
+        expected = (constant_zero_offset(start, fps, frame_count) + frames_rendered) % frame_count
+        actual = constant_zero_offset(next_start, fps, frame_count)
+        if actual != expected:
+            failures += 1
+    assert failures > 0, "constant-0 mutation should break the chaining property"
+
+
+def test_loop_frame_offset_bounds_drift_for_non_integer_frame_windows():
+    """Test 3: for a window length that is not a whole number of frames at
+    the loop's fps, the offset at each of ten consecutive windows stays
+    within one frame of the exact (unrounded) modular value — because the
+    offset is recomputed fresh from the absolute `start_ms` each time rather
+    than accumulated step by step, there is nothing to drift linearly."""
+    fps = 24.0
+    frame_count = 100
+    window_ms = 100  # 100ms * 24fps / 1000 = 2.4 frames: not a whole number
+
+    for i in range(10):
+        start_ms = i * window_ms
+        exact = (start_ms * fps / 1000) % frame_count
+        offset = loop_frame_offset(start_ms, fps, frame_count)
+        diff = min(abs(offset - exact), frame_count - abs(offset - exact))
+        assert diff <= 1.0
+
+
+def test_chunk_window_durations_sum_exactly_to_total_span():
+    """Test 4: the sum of `end - start` over `chunk_windows(spans)` equals
+    `sum(spans)` exactly (built on, not duplicating, test_chunking.py's own
+    coverage of that property), and `loop_frame_offset` produces a
+    well-formed in-range starting frame for every resulting window — the
+    frame each chunk MuseTalk is asked to produce starts from."""
+    spans = [40_000, 55_000, 30_000, 61_000, 20_000]
+    windows = chunk_windows(spans)
+
+    assert sum(end - start for start, end in windows) == sum(spans)
+
+    fps, frame_count = 25.0, 300
+    for start, end in windows:
+        offset = loop_frame_offset(start, fps, frame_count)
+        assert 0 <= offset < frame_count
 
 
 # ---------------------------------------------------------------------------
