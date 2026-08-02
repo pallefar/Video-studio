@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import platform
 import shutil
-import subprocess
 import tempfile
 import uuid as uuidlib
 from pathlib import Path
@@ -31,25 +30,18 @@ from pathlib import Path
 import structlog
 
 from pipeline_core.storage import ObjectStore
+from worker_gpu.engines.audio import (
+    PROJECT_CHANNELS,
+    PROJECT_SAMPLE_RATE,
+    find_ffmpeg as _find_ffmpeg,
+    lipsync_chunk_key,
+    run_ffmpeg as _run,
+    tts_segment_key,
+)
 
 log = structlog.get_logger()
 
 WORDS_PER_MINUTE = 150  # fallback duration estimate when `say` is absent
-
-
-def _find_ffmpeg() -> str:
-    binary = shutil.which("ffmpeg")
-    if binary:
-        return binary
-    import imageio_ffmpeg
-
-    return imageio_ffmpeg.get_ffmpeg_exe()
-
-
-def _run(args: list[str]) -> None:
-    result = subprocess.run(args, capture_output=True, text=True, errors="replace")
-    if result.returncode != 0:
-        raise RuntimeError(f"{args[0]} failed: {result.stderr[-400:]}")
 
 
 class DevTTSEngine:
@@ -80,7 +72,8 @@ class DevTTSEngine:
                 aiff = tmp_path / "segment.aiff"
                 _run([self._say, "-r", str(rate), "-o", str(aiff), text])
                 _run([ffmpeg, "-y", "-hide_banner", "-i", str(aiff),
-                      "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", str(wav)])
+                      "-ar", str(PROJECT_SAMPLE_RATE), "-ac", str(PROJECT_CHANNELS),
+                      "-c:a", "pcm_s16le", str(wav)])
             else:
                 words = max(1, len(text.split()))
                 duration_s = words * 60 / WORDS_PER_MINUTE
@@ -88,14 +81,14 @@ class DevTTSEngine:
                 exaggeration = (emotion or {}).get("exaggeration", 0.5)
                 _run([ffmpeg, "-y", "-hide_banner",
                       "-f", "lavfi",
-                      "-i", f"sine=frequency={base_freq}:sample_rate=48000:duration={duration_s:.2f}",
+                      "-i", f"sine=frequency={base_freq}:sample_rate={PROJECT_SAMPLE_RATE}:duration={duration_s:.2f}",
                       "-af", f"tremolo=f={3 + exaggeration * 5:.1f}:d=0.7,volume=0.5,aformat=channel_layouts=stereo",
                       "-c:a", "pcm_s16le", str(wav)])
 
             from worker_cpu.ffmpeg.ingest import probe
 
             duration_ms = probe(ffmpeg, wav)["duration_ms"] or 1000
-            key = f"jobs/{job_id}/tts/{segment_idx}.wav"
+            key = tts_segment_key(job_id, segment_idx)
             uri = self.store.put_file(key, wav)
         log.info("dev_tts_segment", job_id=job_id, idx=segment_idx, duration_ms=duration_ms)
         return uri, duration_ms
@@ -131,7 +124,7 @@ class DevLipsyncEngine:
             _run([ffmpeg, "-y", "-hide_banner", "-stream_loop", "-1", "-i", str(source),
                   "-t", f"{duration_s:.3f}", "-an",
                   "-c:v", "libx264", "-crf", "23", "-pix_fmt", "yuv420p", str(chunk)])
-            chunk_key = f"jobs/{job_id}/lipsync/{start_ms}_{end_ms}.mp4"
+            chunk_key = lipsync_chunk_key(job_id, start_ms, end_ms)
             uri = self.store.put_file(chunk_key, chunk)
         log.info("dev_lipsync_chunk", job_id=job_id, start_ms=start_ms, end_ms=end_ms)
         return uri
