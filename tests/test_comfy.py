@@ -183,6 +183,210 @@ def test_signature_driven_audit_passes_the_proven_templates():
         assert defects == [], f"{model}: {defects}"
 
 
+# Ten-plus-one templates independently verified broken today (2026-08-02),
+# every entry re-checked against the actual node-pack source rather than
+# assumed from research notes. This list is shrink-only: plans 03-02 and
+# 03-04 own repairing these templates and emptying it; nothing else may
+# grow it back. Two tests below assert both directions — every entry here
+# audits dirty, and every template NOT here audits clean — so a repair
+# that forgets to shrink the list, or a list entry that silently starts
+# passing, fails the suite either way.
+#
+# Defect classes carried by each entry:
+#   wan2.2-t2v/i2v/fun-camera/vace-fun, wan2.1-vace-1.3b, qwen-image:
+#     UnetLoaderGGUF wired clip/vae from output indices 1/2 of a node with
+#     one output, AND its required key is `unet_name`, not the `ckpt_name`
+#     every one of these six passes (city96/ComfyUI-GGUF nodes.py). The
+#     five video templates in this group also omit VHS_VideoCombine's
+#     three required fields; qwen-image outputs to SaveImage so it does
+#     not carry that second defect.
+#   wan2.2-i2v, wan2.2-vace-fun, wan2.1-vace-1.3b, wan2.2-fun-camera, sdxl:
+#     an unreachable node that is the target of the template's own
+#     `inputs` map — source_image, source_video (x2), camera_motion,
+#     lora_name are each silently discarded (three of these five are
+#     already counted above for the loader-wiring defect too).
+#   musetalk-image: VHS_VideoCombine's three missing fields, AND
+#     MuseTalkRun's real upstream signature (chaojie/ComfyUI-MuseTalk
+#     nodes.py) takes `video_path`/`audio_path`/`bbox_shift`/`batch_size`
+#     path strings — not the `image`/`audio`/`seed`/`fps` IMAGE/AUDIO graph
+#     connections this template wires. The node-pack manifest's class-name
+#     probe (comfy_nodes.py) never caught this; only reading the source did.
+#   uni3c, recammaster: VHS_VideoCombine's three missing fields. Their
+#     WanVideoWrapper nodes are a declared blind spot (see
+#     test_declared_blind_spots_are_visible_and_bounded below), not a
+#     defect this audit can currently see — Phase 4 owns verifying that
+#     wiring on hardware.
+#   ace-step: NOT on this phase's research-time list — found only by
+#     reading comfy_extras/nodes_ace.py directly. TextEncodeAceStepAudio
+#     declares `lyrics_strength` required regardless of its default value
+#     (the exact same rule as VHS_VideoCombine's three fields: a default
+#     only sets the client's starting value, ComfyUI's /prompt validation
+#     still requires the key present in the submitted graph), and
+#     ace-step.json's node 6 does not supply it. This is exactly the kind
+#     of latent bug the audit exists to surface — the critical_requirement
+#     is to record what is ACTUALLY dirty, not what research anticipated.
+AWAITING_REPAIR = frozenset({
+    "wan2.2-t2v", "wan2.2-i2v", "wan2.2-fun-camera", "wan2.2-vace-fun",
+    "wan2.1-vace-1.3b", "qwen-image", "sdxl", "musetalk-image", "uni3c",
+    "recammaster", "ace-step",
+})
+
+
+def test_templates_off_the_ratchet_audit_clean():
+    """Every template NOT on AWAITING_REPAIR must audit clean. This is the
+    positive half of the ratchet: a template that starts failing without
+    being added to the list is a real regression."""
+    from pipeline_core.comfy_nodes import audit_graph
+
+    for model in COMFY_MODELS:
+        if model in AWAITING_REPAIR:
+            continue
+        template = load_template(model)
+        defects = audit_graph(template["graph"], output_node=template["output"]["node"])
+        assert defects == [], f"{model}: {defects}"
+
+
+def test_templates_on_the_ratchet_audit_dirty():
+    """Every template ON AWAITING_REPAIR must audit dirty. This is the
+    shrink-only half: a repaired template must be removed from the list,
+    not left to silently pass while still listed as broken."""
+    from pipeline_core.comfy_nodes import audit_graph
+
+    for model in AWAITING_REPAIR:
+        template = load_template(model)
+        defects = audit_graph(template["graph"], output_node=template["output"]["node"])
+        assert defects, (
+            f"{model} now audits clean — remove it from AWAITING_REPAIR "
+            f"(tests/test_comfy.py) now that it has been repaired"
+        )
+
+
+def test_every_edge_source_class_has_a_signature_entry():
+    """Signature coverage: every class type used as the source of an edge,
+    in any shipped template, has an entry in NODE_SIGNATURES — verified or
+    explicitly declared unverified. An uncovered class is a class the audit
+    is blind to, which is itself a defect (Wave 0 gap this phase closes)."""
+    from pipeline_core.comfy_nodes import NODE_SIGNATURES
+
+    for model in COMFY_MODELS:
+        template = load_template(model)
+        graph = template["graph"]
+        for node_id, node in graph.items():
+            for field, value in (node.get("inputs") or {}).items():
+                if not (isinstance(value, list) and len(value) == 2 and isinstance(value[0], str)):
+                    continue
+                src_id = value[0]
+                if src_id not in graph:
+                    continue
+                src_class = graph[src_id]["class_type"]
+                assert src_class in NODE_SIGNATURES, (
+                    f"{model}: {src_class} (node {src_id}) is used as an edge "
+                    f"source with no NODE_SIGNATURES entry — record its "
+                    f"signature from source, or add it with "
+                    f"outputs=None/required_inputs=None and a provenance "
+                    f"string naming what is and isn't known"
+                )
+
+
+def test_declared_blind_spots_are_visible_and_bounded():
+    """Every signature entry recorded as unverified (outputs or
+    required_inputs is None) must be exactly the WanVideoWrapper classes
+    uni3c/recammaster use — the manifest's own notes already record that
+    only their class NAMES were schema-verified against a running
+    ComfyUI's /object_info (M11), not their wiring (research Pitfall 4).
+    Adding a new unverified entry must be a deliberate act that fails this
+    test until the expectation is updated — an audit that silently grows
+    its own blind spot is not an audit."""
+    from pipeline_core.comfy_nodes import NODE_PACKS, NODE_SIGNATURES
+
+    wanvideo_pack = next(p for p in NODE_PACKS if p.name == "ComfyUI-WanVideoWrapper")
+    expected_unverified = frozenset(wanvideo_pack.provides)
+
+    actual_unverified = frozenset(
+        class_type for class_type, sig in NODE_SIGNATURES.items()
+        if sig.outputs is None or sig.required_inputs is None
+    )
+    assert actual_unverified == expected_unverified
+
+
+def test_audit_graph_output_index_check_reads_the_signature_not_a_hardcoded_class():
+    """Mutation guard: audit_graph's output-index check must read the
+    recorded signature, not hardcode a class name. A one-output class
+    wired from index 1 is a defect; the same graph against a doctored
+    two-output signature for that class is not."""
+    from pipeline_core.comfy_nodes import NodeSignature, audit_graph
+
+    graph = {
+        "1": {"class_type": "OneOutputLoader", "inputs": {}},
+        "2": {"class_type": "Consumer", "inputs": {"model": ["1", 1]}},
+    }
+    real = {"OneOutputLoader": NodeSignature(outputs=("MODEL",), required_inputs=None, provenance="test")}
+    defects = audit_graph(graph, signatures=real, output_node="2")
+    assert any("output index 1" in d for d in defects), defects
+
+    doctored = {"OneOutputLoader": NodeSignature(outputs=("MODEL", "CLIP"), required_inputs=None, provenance="test")}
+    defects = audit_graph(graph, signatures=doctored, output_node="2")
+    assert not any("output index" in d for d in defects), defects
+
+
+def test_audit_graph_required_input_check_reads_the_signature():
+    """Mutation guard: a hand-built VHS_VideoCombine node missing
+    loop_count produces a defect naming it; the same graph audits clean
+    once the key is added."""
+    from pipeline_core.comfy_nodes import audit_graph
+
+    graph = {
+        "8": {"class_type": "UpstreamStub", "inputs": {}},
+        "60": {"class_type": "VHS_VideoCombine", "inputs": {
+            "images": ["8", 0], "frame_rate": 16, "filename_prefix": "x",
+            "format": "video/h264-mp4", "pingpong": False, "save_output": True,
+        }},
+    }
+    defects = audit_graph(graph, output_node="60")
+    assert any("loop_count" in d for d in defects), defects
+
+    graph["60"]["inputs"]["loop_count"] = 0
+    defects = audit_graph(graph, output_node="60")
+    assert not any("loop_count" in d for d in defects), defects
+
+
+def test_audit_graph_flags_dangling_edge_reference():
+    """A typo in a node reference — an edge pointing at a node id absent
+    from the graph — is reported as a defect."""
+    from pipeline_core.comfy_nodes import audit_graph
+
+    graph = {"3": {"class_type": "KSampler", "inputs": {"model": ["99", 0]}}}
+    defects = audit_graph(graph)
+    assert any("99" in d for d in defects), defects
+
+
+def test_audit_graph_reachability_and_inert_param_naming():
+    """Mutation guard: a node nothing reads from is a defect; wiring its
+    output into the chain makes the same graph audit clean. When the
+    orphan is the target of the template's own `inputs` map, the defect
+    names the inert studio parameter — that message is the whole value of
+    the check."""
+    from pipeline_core.comfy_nodes import audit_graph
+
+    orphaned = {
+        "1": {"class_type": "Sink", "inputs": {}},
+        "2": {"class_type": "Orphan", "inputs": {}},
+    }
+    defects = audit_graph(orphaned, output_node="1")
+    assert any("2" in d and "unreachable" in d for d in defects), defects
+
+    connected = {
+        "1": {"class_type": "Sink", "inputs": {"upstream": ["2", 0]}},
+        "2": {"class_type": "Orphan", "inputs": {}},
+    }
+    defects = audit_graph(connected, output_node="1")
+    assert not any("unreachable" in d for d in defects), defects
+
+    template_inputs = {"widget_name": ["2", "inputs", "value"]}
+    defects = audit_graph(orphaned, output_node="1", template_inputs=template_inputs)
+    assert any("widget_name" in d for d in defects), defects
+
+
 # --- generation values -------------------------------------------------------
 
 
