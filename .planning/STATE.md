@@ -79,7 +79,12 @@ Last session: 2026-08-02 — Phase 1 Wave 1 executed to the hardware boundary. P
 
 Also done since: plan 01-03 **partial** — `worker_gpu/engines/audio.py` (the CUDA-free contract layer: 48 kHz/stereo constants, ffmpeg helpers, `tts_segment_key`/`lipsync_chunk_key`, `write_project_wav`, `build_window_audio`) plus 01-03 Task 2 in full (dev engines repointed at it, output byte-identical). 9 new CPU tests with real ffmpeg. The two engine bodies remain `NotImplementedError` by design — see 01-03-SUMMARY.md.
 
-**Mac-side work for Phase 1 is now exhausted.** Everything remaining needs the card.
+**Mac-side work is now exhausted across BOTH phases.** Everything remaining needs the card.
+
+Also landed on the Mac since (plans 01-04 and 01-05, Task 1 of each — both deliberate partials, summaries say so):
+- `scripts/bench.py --smoke` rewritten to drive the engines' real public methods and to judge the 20 GB budget against the **device-level `nvidia-smi` figure**, not `torch.cuda.max_memory_allocated()` which excludes the CUDA context and MuseTalk's mmlab ops. Matters because Phase 3 must later fit a 16–22 GB Wan model on the same card. Fixed a real bug found doing it: `_require_gpu()`'s ImportError branch said "requires the GPU host" with no "CUDA" in it — the exact path a torch-less host hits. Verified here: `--smoke` exits 1 with a helpful message, no traceback; no-flag exits 2.
+- `loop_frame_offset(start_ms, fps, frame_count)` in `worker_gpu/engines/audio.py` = `round(start_ms * fps / 1000) % frame_count`, recomputed from absolute `start_ms` every call so there is no accumulated drift. This is the fix for the seam Phase 1 criterion 4 forbids: the dev engine restarts the loop at frame 0 every chunk, which with real MuseTalk means a visible jump every 60–90 s. A permanent mutation-guard test proves the chaining assertion fails if the function is replaced by a constant 0 (the mutation was actually run and observed, then reverted).
+- Deferred with it: wiring the offset into `MuseTalkEngine.sync_chunk` (behaviours 5–6) — the engine is still a bare stub, so there is no chunk-key check or prepared-loop memo to wire into. That is workstation work.
 
 **Phase 2 (Latent Cache) pre-planned and its Mac-side half executed (2026-08-02).** Planned ahead of its Phase 1 dependency by owner decision; the plan-checker passed it and independently confirmed four real defects found by reading source:
 - `build_loop_cache` was dead code (one repo-wide occurrence — its own definition); nothing dispatched it.
