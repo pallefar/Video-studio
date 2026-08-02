@@ -75,5 +75,13 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02 — Phase 1 planned: 5 plans / 4 waves / 15 tasks, plan-checker PASSED first iteration
-Next step: `/gsd-execute-phase 1` — REQUIRES the RTX 3090 host (or a rented CUDA box via scripts/rent_gpu.sh); waves 1–2 also contain Mac-authorable code tasks, but all acceptance checkpoints are workstation-manual
+Last session: 2026-08-02 — Phase 1 Wave 1 executed to the hardware boundary. Plan 01-02 COMPLETE (boot-time engine warming in `worker_gpu/run.py` + 11-test CPU contract harness, TDD). Plan 01-01 PARTIAL: Task 1 done (`scripts/install_engines.sh` + tests + `MUSETALK_ROOT` setting), Task 2 package-legitimacy gate APPROVED by the owner — MuseTalk pinned at `0a89dec45a0192b824e3cf4daf96c239440c5ed8` (2025-09-26), Chatterbox `chatterbox-tts` 0.1.7 (MIT, resemble-ai), mm* all open-mmlab.
+
+Next step: **Task 3 of plan 01-01 — needs the RTX 3090 host.** On the workstation, repo root, studio venv active:
+
+```
+MUSETALK_COMMIT=0a89dec45a0192b824e3cf4daf96c239440c5ed8 bash scripts/install_engines.sh
+python -c "import torch, chatterbox, sys; sys.path.append('third_party/MuseTalk'); import musetalk; print(torch.__version__)"
+```
+
+Report back the installer's RESOLVED VERSIONS block, whether mmcv came from a wheel or a source build (and how long), `pip show resemble-perth`, and any warnings even on exit 0. That measurement feeds Task 4's one-way `checkpoint:decision` (the torch/mmlab stack standardization) — the open risk is MuseTalk's documented `torch==2.0.1` vs Chatterbox's `torch>=2.6`. No CUDA box? `scripts/rent_gpu.sh` (multi-provider) then `scripts/vast_comfyui.sh`.
