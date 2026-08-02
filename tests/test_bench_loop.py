@@ -17,14 +17,16 @@ acceptance criterion that could never be met by any implementation.
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 import pytest
 from sqlmodel import Session, select
 
 import pipeline_core.db as core_db
+import scripts.bench as bench
 import worker_gpu.stages as gpu_stages
 from pipeline_core.metrics import LIPSYNC_STAGE, lipsync_metric_ref, lipsync_ref_suffix
-from schema.models import BaseLoop, JobStatus, Metric, RenderJob, Segment, VoiceProfile
+from schema.models import BaseLoop, JobStatus, Metric, RenderJob, Segment, VoiceProfile, utcnow
 
 
 # --- fakes -------------------------------------------------------------------
@@ -198,3 +200,155 @@ def test_tts_stage_ref_still_bare_job_id(engine, session, monkeypatch, fake_gpu_
         rows = list(check.exec(select(Metric).where(Metric.stage == "tts")).all())
     assert len(rows) == 1
     assert rows[0].ref == job_id
+
+
+# --- Test 8-14: the reader half — scripts/bench.py::bench_loop --------------
+
+
+def _seed_metric(session, *, stage: str, ref: str, duration_ms: int, created_at) -> None:
+    session.add(Metric(stage=stage, ref=ref, duration_ms=duration_ms, created_at=created_at))
+    session.commit()
+
+
+def test_bench_loop_reports_speedup_when_cache_meets_target(engine, session, monkeypatch, capsys):
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    loop_id = str(uuid.uuid4())
+    now = utcnow()
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-cold", loop_id),
+        duration_ms=10_000, created_at=now,
+    )
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-cached", loop_id),
+        duration_ms=5_000, created_at=now + timedelta(seconds=1),
+    )
+
+    code = bench.bench_loop(loop_id)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "cold run" in out and "10.0s" in out
+    assert "cached run" in out and "5.0s" in out
+    assert "50%" in out
+
+
+def test_bench_loop_fails_loudly_when_cache_underperforms(engine, session, monkeypatch, capsys):
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    loop_id = str(uuid.uuid4())
+    now = utcnow()
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-cold", loop_id),
+        duration_ms=10_000, created_at=now,
+    )
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-cached", loop_id),
+        duration_ms=8_000, created_at=now + timedelta(seconds=1),  # only 20% faster
+    )
+
+    code = bench.bench_loop(loop_id)
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "20%" in captured.out
+    assert "under target" in captured.err
+
+
+def test_bench_loop_orders_by_recency_not_insertion(engine, session, monkeypatch, capsys):
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    loop_id = str(uuid.uuid4())
+    now = utcnow()
+    # inserted first, but the LATER (more recent) timestamp — the fast row
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-a", loop_id),
+        duration_ms=1_000, created_at=now + timedelta(seconds=10),
+    )
+    # inserted second, but the EARLIER timestamp — the slow row
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-b", loop_id),
+        duration_ms=5_000, created_at=now,
+    )
+
+    code = bench.bench_loop(loop_id)
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "cold run:   5.0s" in out
+    assert "cached run: 1.0s" in out
+
+
+def test_bench_loop_needs_two_rows_names_count_found(engine, session, monkeypatch, capsys):
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    loop_id = str(uuid.uuid4())
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-only", loop_id),
+        duration_ms=1_000, created_at=utcnow(),
+    )
+
+    code = bench.bench_loop(loop_id)
+
+    assert code == 1
+    assert "found 1" in capsys.readouterr().err
+
+
+def test_bench_loop_ignores_other_loops(engine, session, monkeypatch, capsys):
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    loop_id, other_loop_id = str(uuid.uuid4()), str(uuid.uuid4())
+    now = utcnow()
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-1", other_loop_id),
+        duration_ms=10_000, created_at=now,
+    )
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=lipsync_metric_ref("job-2", other_loop_id),
+        duration_ms=5_000, created_at=now + timedelta(seconds=1),
+    )
+
+    code = bench.bench_loop(loop_id)
+
+    assert code == 1
+    assert "found 0" in capsys.readouterr().err
+
+
+def test_bench_loop_ignores_legacy_job_only_refs(engine, session, monkeypatch, capsys):
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    loop_id = str(uuid.uuid4())
+    now = utcnow()
+    # pre-fix rows: ref was the bare job id, no loop suffix at all
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=str(uuid.uuid4()),
+        duration_ms=10_000, created_at=now,
+    )
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=str(uuid.uuid4()),
+        duration_ms=5_000, created_at=now + timedelta(seconds=1),
+    )
+
+    code = bench.bench_loop(loop_id)
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "found 0" in err
+    assert "before this fix" in err
+
+
+def test_bench_loop_ignores_other_stages_with_same_ref(engine, session, monkeypatch, capsys):
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    loop_id = str(uuid.uuid4())
+    now = utcnow()
+    ref = lipsync_metric_ref("job-export", loop_id)
+    # two rows for an unrelated stage sharing the exact same ref format —
+    # must never be counted toward the lipsync comparison
+    _seed_metric(session, stage="export_total", ref=ref, duration_ms=10_000, created_at=now)
+    _seed_metric(
+        session, stage="export_progress", ref=ref, duration_ms=5_000,
+        created_at=now + timedelta(seconds=1),
+    )
+    _seed_metric(
+        session, stage=LIPSYNC_STAGE, ref=ref, duration_ms=7_000,
+        created_at=now + timedelta(seconds=2),
+    )
+
+    code = bench.bench_loop(loop_id)
+
+    assert code == 1
+    assert "found 1" in capsys.readouterr().err

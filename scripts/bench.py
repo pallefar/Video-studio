@@ -5,7 +5,9 @@
           5 s lip-sync, log peak VRAM and assert it stays under 20 GB.
           Its numbers replace the PLACEHOLDER table in docs/pipeline-spec.md §6.
 --loop  : (M2) render twice against one loop and report the latent-cache
-          speedup; acceptance is a cached run >= 40% faster.
+          speedup; acceptance is a cached run >= 40% faster. Matches lipsync
+          metric rows by loop via a shared ref-suffix helper (not a
+          substring), so a pre-fix or other-loop row can never satisfy it.
 
 Requires the GPU host: pip install -e ".[gpu]". Exits 1 with a clear message
 anywhere else.
@@ -63,23 +65,31 @@ def bench_loop(loop_id: str) -> int:
     measurably (>= 40%) faster than the first. Measured from the metrics
     table — run two renders against the loop (first cold, second cached),
     then this compares the two most recent lipsync stage durations for it.
-    CPU-only logic: usable the moment the workstation has produced runs."""
+    Matches by the ref suffix pipeline_core.metrics.lipsync_ref_suffix
+    defines (not a substring), so neither a different loop's row nor a
+    pre-fix job-id-only row can ever satisfy the query. CPU-only logic:
+    usable the moment the workstation has produced runs."""
     from sqlmodel import Session, select
 
     from pipeline_core.db import get_engine
+    from pipeline_core.metrics import LIPSYNC_STAGE, lipsync_ref_suffix
     from schema.models import Metric
 
+    suffix = lipsync_ref_suffix(loop_id)
     with Session(get_engine()) as session:
         rows = session.exec(
             select(Metric)
-            .where(Metric.stage == "lipsync", Metric.ref.contains(loop_id))
+            .where(Metric.stage == LIPSYNC_STAGE, Metric.ref.endswith(suffix))
             .order_by(Metric.created_at.desc())
             .limit(2)
         ).all()
     if len(rows) < 2:
         print(
             f"bench --loop {loop_id}: need two lipsync runs recorded for this loop "
-            f"(found {len(rows)}) — render the same job twice first",
+            f"(found {len(rows)}) — render the same job twice, or two different jobs "
+            "against this loop. Runs recorded before this fix carry a ref naming only "
+            "the job and are invisible to this query — re-render to get fresh, "
+            "measurable rows.",
             file=sys.stderr,
         )
         return 1
