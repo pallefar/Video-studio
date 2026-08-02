@@ -29,3 +29,7 @@ web/dist/
 weights/
 dump.rdb
 dist-release/
+
+# Vendored research repos (e.g. MuseTalk) — pinned by commit SHA in
+# scripts/install_engines.sh, not by being committed.
+third_party/

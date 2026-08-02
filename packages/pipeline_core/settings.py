@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # CI). Output is watchable but NOT production.
     dev_engines: bool = False
 
+    # MuseTalk vendored clone (Phase 1: scripts/install_engines.sh). Empty ->
+    # resolves to the repo-relative third_party/MuseTalk; a rented GPU host
+    # can point this at a different clone location instead.
+    musetalk_root: str = ""
+
     # ComfyUI headless — the M10 wan-lane executor. Unconfigured -> local
     # generation raises a config hint (and declared fallbacks still run).
     comfy_url: str = ""
