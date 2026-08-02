@@ -77,7 +77,14 @@ All six phases run on the RTX 3090 host, in runbook order (docs/workstation.md �
   2. Real engine loads implemented in `worker_gpu/engines/{tts,lipsync}.py`; `python scripts/bench.py --smoke` exits 0 with Chatterbox producing a 10 s clip, MuseTalk lip-syncing 5 s, and both resident simultaneously with peak VRAM logged under 20 GB
   3. A short script submitted in the panel goes `queued → review` unattended — the first real end-to-end avatar render
   4. A >90 s script splits into 60–90 s chunked lip-sync windows with real MuseTalk and stitches without a visible seam
-**Plans**: TBD
+**Plans**: 5 plans (4 waves — plans 01 and 02 run in parallel; the rest are strictly sequential per runbook order)
+
+Plans:
+- [ ] 01-01-PLAN.md — GPU host environment: resolve the Chatterbox/MuseTalk torch conflict, pin it, `verify_gpu.py` green (M0.1)
+- [ ] 01-02-PLAN.md — Warm both models at boot in `worker_gpu/run.py`; lock the engine interface contract with CUDA-free tests (M3.1 code half)
+- [ ] 01-03-PLAN.md — Tracer: real Chatterbox + real MuseTalk render one sentence to one lip-synced chunk, sharing one contract layer
+- [ ] 01-04-PLAN.md — `bench.py --smoke` renders for real on the 3090; honest peak-VRAM measurement under 20 GB (M0.2, M0.3, M0.4, M3.1)
+- [ ] 01-05-PLAN.md — Frame-continuous multi-window chunking; first unattended `queued → review` render from the panel (M3.4)
 
 ### Phase 2: Latent Cache
 **Goal**: Re-rendering against a preprocessed loop is measurably faster because the real MuseTalk latent cache is built and persisted per loop
@@ -142,7 +149,7 @@ All six phases run on the RTX 3090 host, in runbook order (docs/workstation.md �
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Render Engines Live | 0/TBD | Not started | - |
+| 1. Render Engines Live | 0/5 | Planned | - |
 | 2. Latent Cache | 0/TBD | Not started | - |
 | 3. Wan Lane Bring-Up | 0/TBD | Not started | - |
 | 4. Camera Presets on Hardware | 0/TBD | Not started | - |
