@@ -94,7 +94,12 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. The real latent cache build in `worker_gpu/preprocess/loop_cache.py` runs on the 3090 and the cache is persisted per loop
   2. `python scripts/bench.py --loop <id>` compares the two latest lipsync runs and shows the cached run ≥ 40% faster than the first
-**Plans**: TBD
+**Plans**: 3 plans (3 waves — strictly sequential; waves 1 and 2 are fully CPU-doable on a Mac, wave 3 needs the 3090)
+
+Plans:
+- [ ] 02-01-PLAN.md — Tracer: wire the dead `build_loop_cache` path end to end — dispatch chain, GPU stage, ObjectStore bridge, invalidation, with the model call behind one seam (CPU-doable now)
+- [ ] 02-02-PLAN.md — Fix the two bugs that make this phase's own acceptance command unmeasurable: the lipsync metric ref and `bench_loop`'s query (CPU-doable now)
+- [ ] 02-03-PLAN.md — Real MuseTalk preparation behind the seam, cache-hit path in `sync_chunk`, and the ≥ 40% workstation measurement (M2.3, M2.4 — GPU-blocked)
 
 ### Phase 3: Wan Lane Bring-Up
 **Goal**: The generative lane is live on hardware — ComfyUI headless serving as the wan-lane executor, Wan 2.2 generating real clips, and the Fun-Camera benchmark deciding the 14B-vs-5B default
@@ -150,7 +155,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Render Engines Live | 0/5 | Planned | - |
-| 2. Latent Cache | 0/TBD | Not started | - |
+| 2. Latent Cache | 0/3 | Planned | - |
 | 3. Wan Lane Bring-Up | 0/TBD | Not started | - |
 | 4. Camera Presets on Hardware | 0/TBD | Not started | - |
 | 5. Identity Training | 0/TBD | Not started | - |
