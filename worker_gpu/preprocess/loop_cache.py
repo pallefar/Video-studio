@@ -22,6 +22,30 @@ Idempotent on the loop's own persisted state: `cache_is_present` is the one
 place that question is answered, everywhere in this codebase — a build call
 against a loop with a live cache never touches the store's write path or a
 model.
+
+Invalidation story (spread across three files and a route; recorded here in
+one place so it does not have to be re-derived per session):
+
+    - `PUT /loops/{id}` (`api/routes/loops.py::update_loop`) already
+      blanket-overwrites every `BaseLoopBase` field from the request body,
+      and `BaseLoopCreate` defaults `latents_uri`/`bbox_uri` to `None` — so
+      any PUT to an unreferenced loop nulls the cache columns for free. No
+      new invalidation mechanism was added for this path.
+    - `ping_pong` and `error` live on `BaseLoop` (the table class), not on
+      `BaseLoopBase` — so a PUT nulls the cache columns but leaves
+      `ping_pong` true. `worker_cpu.stages.loop_preprocess_stage`'s
+      ping-pong idempotent early return therefore also chains the cache
+      build (guarded on no error and no live `latents_uri`), or a loop in
+      that state would never rebuild its cache after a source swap.
+    - The chain-from-the-stage ordering (never from a route) means a cache
+      build only ever runs against the loop's FINAL, possibly
+      already-ping-ponged `source_uri`/`frame_count` — both routes
+      (`POST /loops`, `POST /loops/{id}/preprocess`) funnel through the one
+      CPU stage that owns that state.
+    - `cache_is_present` re-checks the store on every call, so a column
+      pointing at a deleted object reads as a miss and the next build call
+      rebuilds it — a stale column can never wedge a loop as "cached
+      forever."
 """
 
 from __future__ import annotations

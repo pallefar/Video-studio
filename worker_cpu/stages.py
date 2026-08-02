@@ -281,6 +281,16 @@ def loop_preprocess_stage(loop_id: str) -> None:
             raise ValueError(f"loop {loop_id} not found")
         if loop.ping_pong:
             log.info("loop_preprocess_skip_idempotent", loop_id=loop_id)
+            # BaseLoopCreate nulls latents_uri/bbox_uri on every PUT, but
+            # ping_pong is table-only and survives it — so an operator who
+            # replaces an already-ping-ponged loop's source and reruns the
+            # manual preprocess endpoint would otherwise get a nulled cache,
+            # a short-circuited CPU stage, and no rebuild, forever. Chain the
+            # same as the success tail, guarded on no error and no live
+            # cache column (a lightweight column check; loop_cache_stage's
+            # own cache_is_present re-verifies the object is actually there).
+            if loop.error is None and loop.latents_uri is None:
+                _chain_loop_cache(loop_id)
             return
 
         store = ObjectStore()

@@ -340,3 +340,121 @@ def test_chain_does_not_fire_on_vfr_rejection(store_env, engine, session, vfr_cl
         assert checked.error is not None and "VFR" in checked.error
 
     assert dispatcher.calls == []
+
+
+# --- the ping-pong idempotent exit also chains (Task 3) --------------------
+
+
+def _make_ping_pong_loop(session: Session, store: ObjectStore, *, error=None, latents_uri=None) -> str:
+    key = "loops/src/pp.mp4"
+    store.put_bytes(key, b"pp-bytes")
+    loop = BaseLoop(
+        name="pp", source_uri=store.uri_for(key), fps=25.0, frame_count=50,
+        ping_pong=True, error=error, latents_uri=latents_uri,
+    )
+    session.add(loop)
+    session.commit()
+    session.refresh(loop)
+    return str(loop.id)
+
+
+def test_pingpong_exit_chains_when_cache_missing(store_env, engine, session, monkeypatch):
+    import pipeline_core.dispatch as core_dispatch
+
+    monkeypatch.setattr(cpu_stages, "_find_ffmpeg", lambda: "/usr/bin/ffmpeg")
+    dispatcher = RecordingDispatcher()
+    monkeypatch.setattr(core_dispatch, "Dispatcher", lambda *a, **kw: dispatcher)
+
+    loop_id = _make_ping_pong_loop(session, store_env)
+    cpu_stages.loop_preprocess_stage(loop_id)
+
+    assert dispatcher.calls == [
+        (QUEUE_GPU, "worker_gpu.stages.loop_cache_stage", (loop_id,), f"{loop_id}-loop_cache")
+    ]
+
+
+def test_pingpong_exit_does_not_chain_with_live_cache(store_env, engine, session, monkeypatch):
+    import pipeline_core.dispatch as core_dispatch
+
+    monkeypatch.setattr(cpu_stages, "_find_ffmpeg", lambda: "/usr/bin/ffmpeg")
+    dispatcher = RecordingDispatcher()
+    monkeypatch.setattr(core_dispatch, "Dispatcher", lambda *a, **kw: dispatcher)
+
+    loop_id = _make_ping_pong_loop(
+        session, store_env, latents_uri="s3://loop-cache-test/loops/x/cache/latents.pt"
+    )
+    cpu_stages.loop_preprocess_stage(loop_id)
+
+    assert dispatcher.calls == []
+
+
+def test_pingpong_exit_does_not_chain_with_error(store_env, engine, session, monkeypatch):
+    import pipeline_core.dispatch as core_dispatch
+
+    monkeypatch.setattr(cpu_stages, "_find_ffmpeg", lambda: "/usr/bin/ffmpeg")
+    dispatcher = RecordingDispatcher()
+    monkeypatch.setattr(core_dispatch, "Dispatcher", lambda *a, **kw: dispatcher)
+
+    loop_id = _make_ping_pong_loop(session, store_env, error="some prior error")
+    cpu_stages.loop_preprocess_stage(loop_id)
+
+    assert dispatcher.calls == []
+
+
+# --- load_loop_cache: the reverse bridge, and the stale-column case --------
+
+
+def test_load_loop_cache_round_trips_bytes(store_env, engine, session, tmp_path):
+    loop_id = _make_loop(session, store_env)
+    lc.build_loop_cache(store_env, loop_id, FakePreparer(write_mask=True))
+
+    dest = tmp_path / "restored"
+    result = lc.load_loop_cache(store_env, loop_id, dest)
+
+    assert result == dest
+    assert (dest / lc.LATENTS_FILENAME).read_bytes() == b"latents-bytes"
+    assert (dest / lc.COORDS_FILENAME).read_bytes() == b"coords-bytes"
+    assert (dest / lc.MASK_COORDS_FILENAME).read_bytes() == b"mask-bytes"
+    assert sorted(p.name for p in dest.iterdir()) == sorted(
+        [lc.LATENTS_FILENAME, lc.COORDS_FILENAME, lc.MASK_COORDS_FILENAME]
+    )
+
+
+def test_load_loop_cache_miss_returns_none_and_leaves_dest_empty(store_env, tmp_path):
+    dest = tmp_path / "restored"
+    dest.mkdir()
+
+    result = lc.load_loop_cache(store_env, "nonexistent-loop", dest)
+
+    assert result is None
+    assert list(dest.iterdir()) == []
+
+
+def test_load_loop_cache_mask_optional(store_env, engine, session, tmp_path):
+    loop_id = _make_loop(session, store_env)
+    lc.build_loop_cache(store_env, loop_id, FakePreparer())  # no mask written
+
+    dest = tmp_path / "restored"
+    result = lc.load_loop_cache(store_env, loop_id, dest)
+
+    assert result == dest
+    assert not (dest / lc.MASK_COORDS_FILENAME).exists()
+    assert (dest / lc.LATENTS_FILENAME).exists()
+
+
+def test_cache_is_present_false_when_object_deleted_then_rebuilds(store_env, engine, session):
+    loop_id = _make_loop(session, store_env)
+    lc.build_loop_cache(store_env, loop_id, FakePreparer())
+
+    with Session(engine) as check:
+        loop = check.get(BaseLoop, uuid.UUID(loop_id))
+        assert lc.cache_is_present(store_env, loop) is True
+
+    store_env.client.delete_object(Bucket=store_env.bucket, Key=lc.latents_key(loop_id))
+
+    with Session(engine) as check2:
+        loop2 = check2.get(BaseLoop, uuid.UUID(loop_id))
+        assert lc.cache_is_present(store_env, loop2) is False  # stale column reads as a miss
+
+    rebuilt = lc.build_loop_cache(store_env, loop_id, FakePreparer())
+    assert rebuilt is True
