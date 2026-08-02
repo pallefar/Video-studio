@@ -16,7 +16,7 @@ from sqlmodel import select
 from pipeline_core.chunking import chunk_windows
 from pipeline_core.db import advance_job, fail_job, open_session
 from pipeline_core.emotions import emotion_params
-from pipeline_core.metrics import timed_stage
+from pipeline_core.metrics import LIPSYNC_STAGE, lipsync_metric_ref, timed, timed_stage
 from pipeline_core.dispatch import Dispatcher, get_redis
 from pipeline_core.locks import HOLDER_RENDER, GpuLockHeld, gpu_lock
 from pipeline_core.queues import QUEUE_CPU, QUEUE_GPU, stage_key
@@ -113,33 +113,44 @@ def tts_stage(job_id: str) -> None:
     )
 
 
-@timed_stage("lipsync")
 def lipsync_stage(job_id: str) -> None:
+    """Explicitly scoped metric span (not the blanket @timed_stage decorator
+    every other stage uses): the ref must name both the job and the loop so
+    scripts/bench.py::bench_loop can find every run for a loop, not just one
+    job (see pipeline_core.metrics.lipsync_metric_ref). The idempotent early
+    return below sits OUTSIDE the span on purpose — a duplicate queue
+    delivery must record nothing, not a near-zero-duration row that a
+    speedup comparison would misread as the cached run. The span still
+    covers the failure path (timed() records from a finally block), so a
+    lipsync run that dies inside the engine remains visible in the metrics
+    table."""
     with open_session() as session:
         job = _get_job(session, job_id)
         if job.status != JobStatus.lipsync:
             log.info("lipsync_skip_idempotent", job_id=job_id, status=job.status.value)
             return
 
-        segments = _segments(session, job_id)
-        missing = [s.idx for s in segments if s.duration_ms is None]
-        if missing:
-            raise ValueError(f"job {job_id}: segments without audio: {missing}")
+        ref = lipsync_metric_ref(job_id, str(job.base_loop_id))
+        with timed(LIPSYNC_STAGE, ref):
+            segments = _segments(session, job_id)
+            missing = [s.idx for s in segments if s.duration_ms is None]
+            if missing:
+                raise ValueError(f"job {job_id}: segments without audio: {missing}")
 
-        spans = [s.duration_ms + s.pause_after_ms for s in segments]
-        windows = chunk_windows(spans)
-        _, lipsync_engine = get_engines()
-        try:
-            with gpu_lock(get_redis(), HOLDER_RENDER):
-                for start_ms, end_ms in windows:
-                    lipsync_engine.sync_chunk(job_id, str(job.base_loop_id), start_ms, end_ms)
-                    log.info("lipsync_chunk_done", job_id=job_id, start_ms=start_ms, end_ms=end_ms)
-        except GpuLockHeld:
-            raise
-        except Exception as exc:
-            fail_job(session, job, f"lipsync: {exc}")
-            raise
-        advance_job(session, job, JobStatus.assemble)
+            spans = [s.duration_ms + s.pause_after_ms for s in segments]
+            windows = chunk_windows(spans)
+            _, lipsync_engine = get_engines()
+            try:
+                with gpu_lock(get_redis(), HOLDER_RENDER):
+                    for start_ms, end_ms in windows:
+                        lipsync_engine.sync_chunk(job_id, str(job.base_loop_id), start_ms, end_ms)
+                        log.info("lipsync_chunk_done", job_id=job_id, start_ms=start_ms, end_ms=end_ms)
+            except GpuLockHeld:
+                raise
+            except Exception as exc:
+                fail_job(session, job, f"lipsync: {exc}")
+                raise
+            advance_job(session, job, JobStatus.assemble)
 
     Dispatcher().enqueue(
         QUEUE_CPU, "worker_cpu.stages.assemble_stage", job_id, job_key=stage_key(job_id, "assemble")

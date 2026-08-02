@@ -14,6 +14,30 @@ import structlog
 
 log = structlog.get_logger()
 
+# lipsync_stage's metric ref contract (consumed by scripts/bench.py::bench_loop).
+# The writer (worker_gpu.stages.lipsync_stage) and the reader (bench_loop) must
+# agree on exactly one ref format — this is the load-bearing shape, not a naming
+# preference. A UUID's canonical form never contains a colon, so a colon
+# separator plus the loop id can never collide with a job id, and a suffix
+# match on it can never false-match a legacy (job-id-only) row or a different
+# loop's row.
+LIPSYNC_STAGE = "lipsync"
+_LIPSYNC_REF_SEPARATOR = ":"
+
+
+def lipsync_metric_ref(job_id: str, loop_id: str) -> str:
+    """The ref a lipsync metric row is written under: names both the job that
+    produced it and the loop it was rendered against. See lipsync_ref_suffix,
+    the reader half of this contract."""
+    return f"{job_id}{_LIPSYNC_REF_SEPARATOR}{loop_id}"
+
+
+def lipsync_ref_suffix(loop_id: str) -> str:
+    """The suffix scripts/bench.py::bench_loop matches a lipsync metric ref
+    against to find every run recorded for one loop, regardless of which job
+    produced it. Always a suffix of lipsync_metric_ref(<any job>, loop_id)."""
+    return f"{_LIPSYNC_REF_SEPARATOR}{loop_id}"
+
 
 def timed_stage(stage: str):
     """Decorator for worker stage functions whose first argument is the ref."""
