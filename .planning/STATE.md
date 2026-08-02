@@ -77,6 +77,10 @@ None yet.
 
 Last session: 2026-08-02 — Phase 1 Wave 1 executed to the hardware boundary. Plan 01-02 COMPLETE (boot-time engine warming in `worker_gpu/run.py` + 11-test CPU contract harness, TDD). Plan 01-01 PARTIAL: Task 1 done (`scripts/install_engines.sh` + tests + `MUSETALK_ROOT` setting), Task 2 package-legitimacy gate APPROVED by the owner — MuseTalk pinned at `0a89dec45a0192b824e3cf4daf96c239440c5ed8` (2025-09-26), Chatterbox `chatterbox-tts` 0.1.7 (MIT, resemble-ai), mm* all open-mmlab.
 
+Also done since: plan 01-03 **partial** — `worker_gpu/engines/audio.py` (the CUDA-free contract layer: 48 kHz/stereo constants, ffmpeg helpers, `tts_segment_key`/`lipsync_chunk_key`, `write_project_wav`, `build_window_audio`) plus 01-03 Task 2 in full (dev engines repointed at it, output byte-identical). 9 new CPU tests with real ffmpeg. The two engine bodies remain `NotImplementedError` by design — see 01-03-SUMMARY.md.
+
+**Mac-side work for Phase 1 is now exhausted.** Everything remaining needs the card.
+
 Next step: **Task 3 of plan 01-01 — needs the RTX 3090 host.** On the workstation, repo root, studio venv active:
 
 ```
