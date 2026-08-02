@@ -15,6 +15,23 @@ from schema.models import Asset, AssetOrigin, JobStatus, RenderJob
 
 log = structlog.get_logger()
 
+LOOP_CACHE_STAGE = "worker_gpu.stages.loop_cache_stage"
+
+
+def _chain_loop_cache(loop_id: str) -> None:
+    """Enqueue the GPU-lane cache build for a loop. Best-effort, exactly like
+    ingest_stage's caption chain below — direct invocation in tests and
+    scripts has no Redis and must not break."""
+    try:
+        from pipeline_core.dispatch import Dispatcher
+        from pipeline_core.queues import QUEUE_GPU, stage_key
+
+        Dispatcher().enqueue(
+            QUEUE_GPU, LOOP_CACHE_STAGE, loop_id, job_key=stage_key(loop_id, "loop_cache")
+        )
+    except Exception:
+        log.warning("loop_cache_enqueue_failed", loop_id=loop_id)
+
 
 @timed_stage("assemble")
 def assemble_stage(job_id: str) -> None:
@@ -297,6 +314,12 @@ def loop_preprocess_stage(loop_id: str) -> None:
         session.add(loop)
         session.commit()
         log.info("loop_preprocess_done", loop_id=loop_id, vfr_ratio=ratio, seam_score=loop.seam_score)
+
+        # M2 (GPU half): the cache build only ever runs against the loop's
+        # FINAL, possibly ping-ponged source_uri/frame_count — this is the
+        # only dispatch site, never the route (RESEARCH.md Pitfall 3).
+        if loop.error is None:
+            _chain_loop_cache(loop_id)
 
 
 def derived_prefix(asset_id: str) -> str:

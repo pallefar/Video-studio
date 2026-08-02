@@ -21,7 +21,16 @@ from pipeline_core.dispatch import Dispatcher, get_redis
 from pipeline_core.locks import HOLDER_RENDER, GpuLockHeld, gpu_lock
 from pipeline_core.queues import QUEUE_CPU, QUEUE_GPU, stage_key
 from pipeline_core.storage import ObjectStore
-from schema.models import Identity, IdentityTrainingStatus, JobStatus, RenderJob, Segment, utcnow
+from schema.models import (
+    BaseLoop,
+    Identity,
+    IdentityTrainingStatus,
+    JobStatus,
+    RenderJob,
+    Segment,
+    utcnow,
+)
+from worker_gpu.preprocess import loop_cache
 
 log = structlog.get_logger()
 
@@ -135,6 +144,51 @@ def lipsync_stage(job_id: str) -> None:
     Dispatcher().enqueue(
         QUEUE_CPU, "worker_cpu.stages.assemble_stage", job_id, job_key=stage_key(job_id, "assemble")
     )
+
+
+@timed_stage("loop_cache")
+def loop_cache_stage(loop_id: str) -> None:
+    """M2 (GPU half): builds MuseTalk's persisted latent/bbox cache for a
+    loop once CPU preprocessing has finished (worker_cpu.stages
+    .loop_preprocess_stage's chain, on both its success tail and its
+    ping-pong idempotent exit). Idempotent on the loop's own persisted state
+    (BaseLoop.latents_uri via loop_cache.cache_is_present) — this cache is
+    loop-scoped, not job-scoped, so there is no job row here.
+
+    Resolves the engine and checks cache_is_present BEFORE acquiring the GPU
+    lock, so a no-op never takes the card away from a waiting render. If the
+    resident lip-sync engine exposes no `prepare_loop_cache` seam — true
+    today, and true under DEV_ENGINES=1 on any Mac — logs a loud structured
+    warning naming the engine class and returns without touching the
+    columns, keeping ./scripts/dev_up.sh and CI green while making the
+    Phase-1 dependency visible in the logs rather than as a crash."""
+    store = ObjectStore()
+    with open_session() as session:
+        loop = session.get(BaseLoop, uuid.UUID(loop_id))
+        if loop is None:
+            raise ValueError(f"loop {loop_id} not found")
+        if loop_cache.cache_is_present(store, loop):
+            log.info("loop_cache_skip_idempotent", loop_id=loop_id)
+            return
+
+    _, lipsync_engine = get_engines()
+    prepare = getattr(lipsync_engine, "prepare_loop_cache", None)
+    if prepare is None:
+        log.warning(
+            "loop_cache_no_preparer", loop_id=loop_id,
+            engine=type(lipsync_engine).__name__,
+        )
+        return
+
+    try:
+        with gpu_lock(get_redis(), HOLDER_RENDER):
+            loop_cache.build_loop_cache(store, loop_id, prepare)
+    except GpuLockHeld:
+        raise  # transient — the loop stays uncached, a re-enqueue retries
+    except Exception as exc:
+        # there is no job row to fail here — the loop simply stays uncached
+        log.warning("loop_cache_build_failed", loop_id=loop_id, error=str(exc))
+        raise
 
 
 @timed_stage("generation")

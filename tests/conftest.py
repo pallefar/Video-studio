@@ -113,6 +113,39 @@ def redis_url(tmp_path_factory):
     proc.wait(timeout=5)
 
 
+class _FakeGpuRedis:
+    """Minimal in-memory stand-in for the three redis operations gpu_lock
+    actually uses (set with nx/ex, get, eval for compare-and-delete) — real
+    enough that the genuine gpu_lock context manager runs against it
+    unmodified. redis-server is absent on the authoring Mac, where the
+    session-scoped redis_url fixture above skips; this fixture lets
+    gpu_lock-driven tests still exercise the real locking code. Reused by
+    plan 02-02 for lipsync_stage."""
+
+    def __init__(self):
+        self._store: dict[str, str] = {}
+
+    def set(self, key, value, nx=False, ex=None):
+        if nx and key in self._store:
+            return False
+        self._store[key] = value
+        return True
+
+    def get(self, key):
+        return self._store.get(key)
+
+    def eval(self, script, numkeys, key, value):
+        if self._store.get(key) == value:
+            del self._store[key]
+            return 1
+        return 0
+
+
+@pytest.fixture()
+def fake_gpu_redis():
+    return _FakeGpuRedis()
+
+
 @pytest.fixture()
 def voice(session) -> VoiceProfile:
     voice = VoiceProfile(
