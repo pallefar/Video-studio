@@ -19,12 +19,16 @@ real VRAM — that acceptance is workstation-manual and gated in plan 01-03.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 from structlog.testing import capture_logs
 
 import worker_gpu.run as run_module
 import worker_gpu.stages as gpu_stages
 from worker_gpu.engines.dev import DevLipsyncEngine, DevTTSEngine
+from worker_gpu.engines.lipsync import MuseTalkEngine
+from worker_gpu.engines.tts import ChatterboxEngine
 
 
 class _FakeQueue:
@@ -143,3 +147,95 @@ def test_main_calls_get_engines_exactly_once_during_boot(monkeypatch):
     run_module.main()
 
     assert calls.count("get_engines") == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 2: engine interface contract, CUDA-free
+# ---------------------------------------------------------------------------
+
+# Chatterbox's documented valid ranges for its two delivery controls
+# (github.com/resemble-ai/chatterbox — generate() docstring).
+CHATTERBOX_EXAGGERATION_RANGE = (0.25, 2.0)
+CHATTERBOX_CFG_WEIGHT_RANGE = (0.2, 1.0)
+
+
+def _positional_params(func) -> list[inspect.Parameter]:
+    sig = inspect.signature(func)
+    return [
+        p
+        for p in sig.parameters.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        and p.name != "self"
+    ]
+
+
+def test_chatterbox_and_dev_tts_synthesize_segment_share_a_call_contract():
+    """`ChatterboxEngine.synthesize_segment` and `DevTTSEngine.synthesize_segment`
+    accept the same positional parameter count in the same order and both
+    accept `emotion` as a keyword."""
+    real_params = _positional_params(ChatterboxEngine.synthesize_segment)
+    dev_params = _positional_params(DevTTSEngine.synthesize_segment)
+
+    assert len(real_params) == len(dev_params)
+    assert [p.name for p in real_params] == [p.name for p in dev_params]
+
+    real_sig = inspect.signature(ChatterboxEngine.synthesize_segment)
+    dev_sig = inspect.signature(DevTTSEngine.synthesize_segment)
+    assert "emotion" in real_sig.parameters
+    assert "emotion" in dev_sig.parameters
+    assert real_sig.parameters["emotion"].kind in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    )
+
+
+def test_musetalk_and_dev_lipsync_sync_chunk_share_a_call_contract():
+    """`MuseTalkEngine.sync_chunk` and `DevLipsyncEngine.sync_chunk` accept
+    the same positional parameter count in the same order. Parameter NAMES
+    differ (`chunk_start_ms` vs `start_ms`) while POSITIONS match — the
+    stages.py call site passes positionally, so compare arity and order,
+    not names."""
+    real_params = _positional_params(MuseTalkEngine.sync_chunk)
+    dev_params = _positional_params(DevLipsyncEngine.sync_chunk)
+
+    assert len(real_params) == len(dev_params)
+    # job_id and loop_id are named identically on both; the remaining two
+    # (start/end ms) differ in name but must hold the same position.
+    assert real_params[0].name == dev_params[0].name == "job_id"
+    assert real_params[1].name == dev_params[1].name == "loop_id"
+
+
+@pytest.mark.parametrize("engine_cls", [ChatterboxEngine, MuseTalkEngine])
+def test_real_engine_load_refuses_without_cuda(engine_cls):
+    """Both real engines' `load()` raise rather than return when no CUDA
+    device is present — the guard that keeps dev engines opt-in rather than
+    a silent fallback. Must pass on a machine with no torch installed at
+    all, or CPU-only torch — never by faking a CUDA device being present,
+    which would let a deleted guard pass silently."""
+    engine = engine_cls(store=None)
+    with pytest.raises((ImportError, RuntimeError, NotImplementedError)):
+        engine.load()
+
+
+def test_emotion_presets_carry_exactly_chatterbox_two_keys_in_range():
+    """Every emotion preset in `pipeline_core.emotions.EMOTIONS` carries
+    exactly the two keys Chatterbox's generate call consumes, with values
+    inside Chatterbox's documented ranges — so `emotion_params()` output can
+    be passed straight through with no translation layer."""
+    from pipeline_core.emotions import EMOTIONS
+
+    for name, params in EMOTIONS.items():
+        assert set(params.keys()) == {"exaggeration", "cfg_weight"}, name
+        exaggeration = params["exaggeration"]
+        cfg_weight = params["cfg_weight"]
+        assert CHATTERBOX_EXAGGERATION_RANGE[0] <= exaggeration <= CHATTERBOX_EXAGGERATION_RANGE[1], name
+        assert CHATTERBOX_CFG_WEIGHT_RANGE[0] <= cfg_weight <= CHATTERBOX_CFG_WEIGHT_RANGE[1], name
+
+
+@pytest.mark.parametrize("engine_cls", [ChatterboxEngine, MuseTalkEngine])
+def test_real_engine_constructs_from_store_alone_and_exposes_load(engine_cls):
+    """Both real engine classes construct from an ObjectStore alone and
+    expose `load`, so `get_engines()` can build them uniformly."""
+    ctor_params = _positional_params(engine_cls.__init__)
+    assert [p.name for p in ctor_params] == ["store"]
+    assert hasattr(engine_cls, "load") and callable(engine_cls.load)
