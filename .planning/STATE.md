@@ -75,5 +75,5 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-02 — project initialization from ingested docs
-Next step: `/gsd-plan-phase 1` (Render Engines Live — runbook steps 1–3, on the 3090 host)
+Last session: 2026-08-02 — Phase 1 planned: 5 plans / 4 waves / 15 tasks, plan-checker PASSED first iteration
+Next step: `/gsd-execute-phase 1` — REQUIRES the RTX 3090 host (or a rented CUDA box via scripts/rent_gpu.sh); waves 1–2 also contain Mac-authorable code tasks, but all acceptance checkpoints are workstation-manual
