@@ -20,15 +20,42 @@ real VRAM — that acceptance is workstation-manual and gated in plan 01-03.
 from __future__ import annotations
 
 import inspect
+import subprocess
+import wave
+from array import array
 
 import pytest
+from moto import mock_aws
+from sqlmodel import Session
 from structlog.testing import capture_logs
 
+import pipeline_core.db as core_db
 import worker_gpu.run as run_module
 import worker_gpu.stages as gpu_stages
+from pipeline_core.settings import Settings
+from pipeline_core.storage import ObjectStore
+from worker_cpu.ffmpeg.assemble import chunk_keys_for_job
+from worker_cpu.ffmpeg.ingest import probe
+from worker_gpu.engines.audio import (
+    PROJECT_CHANNELS,
+    PROJECT_SAMPLE_RATE,
+    build_window_audio,
+    find_ffmpeg,
+    lipsync_chunk_key,
+    tts_segment_key,
+    write_project_wav,
+)
 from worker_gpu.engines.dev import DevLipsyncEngine, DevTTSEngine
 from worker_gpu.engines.lipsync import MuseTalkEngine
 from worker_gpu.engines.tts import ChatterboxEngine
+
+
+@pytest.fixture(scope="module")
+def ffmpeg_bin():
+    try:
+        return find_ffmpeg()
+    except Exception:
+        pytest.skip("no ffmpeg available")
 
 
 class _FakeQueue:
@@ -239,3 +266,215 @@ def test_real_engine_constructs_from_store_alone_and_exposes_load(engine_cls):
     ctor_params = _positional_params(engine_cls.__init__)
     assert [p.name for p in ctor_params] == ["store"]
     assert hasattr(engine_cls, "load") and callable(engine_cls.load)
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (partial — CUDA-free contract layer only): worker_gpu/engines/audio.py
+#
+# This plan is executed in two halves. This half covers only the contract
+# helpers that need no model: key shapes, the 48 kHz stereo convention, and
+# the lip-sync window-audio timeline. `ChatterboxEngine.synthesize_segment`
+# and `MuseTalkEngine.sync_chunk` (the plan's Tests 7-9) remain out of scope
+# here — see 01-03-SUMMARY.md.
+# ---------------------------------------------------------------------------
+
+
+def _tone_segment_wav(ffmpeg_bin: str, tmp_path, name: str, freq: int, duration_ms: int):
+    path = tmp_path / f"{name}.wav"
+    subprocess.run(
+        [
+            ffmpeg_bin, "-y", "-hide_banner", "-f", "lavfi",
+            "-i", f"sine=frequency={freq}:sample_rate=48000:duration={duration_ms / 1000:.3f}",
+            "-ac", "2", "-c:a", "pcm_s16le", str(path),
+        ],
+        check=True, capture_output=True,
+    )
+    return path
+
+
+def _timeline_store_and_segments(ffmpeg_bin: str, tmp_path):
+    """Three segments with distinct tones and non-zero trailing pauses:
+    seg0 [0,2000) tone 220Hz, pause to 2500; seg1 [2500,5500) tone 900Hz,
+    pause to 5800; seg2 [5800,8300) tone 1700Hz, no pause."""
+    store = ObjectStore(Settings(s3_endpoint="", s3_bucket="window-audio"))
+    store.ensure_bucket()
+    specs = [(0, 220, 2000, 500), (1, 900, 3000, 300), (2, 1700, 2500, 0)]
+    segments = []
+    for idx, freq, duration_ms, pause_ms in specs:
+        local = _tone_segment_wav(ffmpeg_bin, tmp_path, f"seg{idx}", freq, duration_ms)
+        uri = store.put_file(f"jobs/window-job/tts/{idx}.wav", local)
+        segments.append(
+            {"idx": idx, "audio_uri": uri, "duration_ms": duration_ms, "pause_after_ms": pause_ms}
+        )
+    return store, segments
+
+
+def _extract_pcm(ffmpeg_bin: str, wav_path, start_s: float, dur_s: float) -> bytes:
+    result = subprocess.run(
+        [
+            ffmpeg_bin, "-hide_banner", "-nostdin", "-i", str(wav_path),
+            "-ss", f"{start_s:.3f}", "-t", f"{dur_s:.3f}",
+            "-ac", "1", "-ar", "8000", "-f", "s16le", "-",
+        ],
+        capture_output=True,
+    )
+    return result.stdout
+
+
+def _zero_crossing_freq(pcm_bytes: bytes, sample_rate: int = 8000) -> float:
+    """Cheap dominant-frequency estimate for a near-pure tone: count sign
+    changes and divide by 2x the analysed duration. Good enough to tell 220
+    Hz from 900 Hz from 1700 Hz apart without an FFT dependency."""
+    samples = array("h")
+    samples.frombytes(pcm_bytes[: len(pcm_bytes) - (len(pcm_bytes) % 2)])
+    if len(samples) < 2:
+        return 0.0
+    crossings = sum(1 for a, b in zip(samples, samples[1:]) if (a >= 0) != (b >= 0))
+    duration_s = len(samples) / sample_rate
+    return crossings / (2 * duration_s) if duration_s > 0 else 0.0
+
+
+def test_tts_and_lipsync_key_shapes_round_trip_through_assemble_sort():
+    """Test 1: key shapes match the dev engine/assembler convention, and the
+    lipsync key's leading integer is exactly the window start — proven by
+    round-tripping through the assembler's own sort function."""
+    assert tts_segment_key("job-1", 0) == "jobs/job-1/tts/0.wav"
+    key = lipsync_chunk_key("job-1", 0, 5000)
+    assert key == "jobs/job-1/lipsync/0_5000.mp4"
+
+    with mock_aws():
+        store = ObjectStore(Settings(s3_endpoint="", s3_bucket="key-shape"))
+        store.ensure_bucket()
+        store.put_bytes(key, b"fake-mp4-bytes")
+        assert chunk_keys_for_job(store, "job-1") == [key]
+
+
+def test_lipsync_chunk_key_survives_out_of_order_writes():
+    """Test 2: chunk_keys_for_job returns ascending window order regardless
+    of the order the chunks were written to the store."""
+    with mock_aws():
+        store = ObjectStore(Settings(s3_endpoint="", s3_bucket="key-order"))
+        store.ensure_bucket()
+        windows = [(60000, 120000), (0, 60000), (120000, 150000)]
+        for start, end in windows:
+            store.put_bytes(lipsync_chunk_key("job-2", start, end), b"fake-mp4-bytes")
+
+        assert chunk_keys_for_job(store, "job-2") == [
+            lipsync_chunk_key("job-2", 0, 60000),
+            lipsync_chunk_key("job-2", 60000, 120000),
+            lipsync_chunk_key("job-2", 120000, 150000),
+        ]
+
+
+def test_write_project_wav_converts_to_project_convention(ffmpeg_bin, tmp_path):
+    """Test 3: a 24 kHz mono input becomes 48 kHz stereo pcm_s16le,
+    preserving duration within 20 ms — Chatterbox's native output format
+    (RESEARCH.md Pitfall 3)."""
+    src = tmp_path / "src.wav"
+    subprocess.run(
+        [
+            ffmpeg_bin, "-y", "-hide_banner", "-f", "lavfi",
+            "-i", "sine=frequency=220:sample_rate=24000:duration=1.5",
+            "-ac", "1", "-c:a", "pcm_s16le", str(src),
+        ],
+        check=True, capture_output=True,
+    )
+    src_duration_ms = probe(ffmpeg_bin, src)["duration_ms"]
+
+    dst = tmp_path / "dst.wav"
+    write_project_wav(ffmpeg_bin, src, dst)
+
+    with wave.open(str(dst), "rb") as w:
+        assert w.getframerate() == PROJECT_SAMPLE_RATE
+        assert w.getnchannels() == PROJECT_CHANNELS
+
+    dst_duration_ms = probe(ffmpeg_bin, dst)["duration_ms"]
+    assert abs(dst_duration_ms - src_duration_ms) <= 20
+
+
+def test_build_window_audio_matches_window_length(ffmpeg_bin, tmp_path):
+    """Test 4: output duration equals end_ms - start_ms within 40 ms, for a
+    window that starts mid-segment and ends mid-segment."""
+    with mock_aws():
+        store, segments = _timeline_store_and_segments(ffmpeg_bin, tmp_path)
+        dst = tmp_path / "window.wav"
+        start_ms, end_ms = 1000, 6300
+        build_window_audio(ffmpeg_bin, store, segments, start_ms, end_ms, dst)
+
+        duration_ms = probe(ffmpeg_bin, dst)["duration_ms"]
+        assert abs(duration_ms - (end_ms - start_ms)) <= 40
+
+
+def test_build_window_audio_places_segments_at_timeline_offsets(ffmpeg_bin, tmp_path):
+    """Test 5: segment audio lands at the offset implied by
+    duration_ms + pause_after_ms, not naive back-to-back concatenation —
+    probed by the distinct tone frequency present at known offsets into the
+    output."""
+    with mock_aws():
+        store, segments = _timeline_store_and_segments(ffmpeg_bin, tmp_path)
+        dst = tmp_path / "window.wav"
+        start_ms, end_ms = 1000, 6300
+        build_window_audio(ffmpeg_bin, store, segments, start_ms, end_ms, dst)
+
+        # 500ms into the window -> global t=1500, inside seg0's audio [0,2000).
+        freq = _zero_crossing_freq(_extract_pcm(ffmpeg_bin, dst, 0.5, 0.3))
+        assert abs(freq - 220) < 80
+
+        # 2000ms into the window -> global t=3000, inside seg1's audio [2500,5500).
+        freq = _zero_crossing_freq(_extract_pcm(ffmpeg_bin, dst, 2.0, 0.3))
+        assert abs(freq - 900) < 200
+
+        # 5000ms into the window -> global t=6000, inside seg2's audio [5800,8300).
+        freq = _zero_crossing_freq(_extract_pcm(ffmpeg_bin, dst, 5.0, 0.3))
+        assert abs(freq - 1700) < 300
+
+
+def test_build_window_audio_is_project_convention(ffmpeg_bin, tmp_path):
+    """Test 6: build_window_audio output is 48 kHz stereo — the same
+    convention as TTS output."""
+    with mock_aws():
+        store, segments = _timeline_store_and_segments(ffmpeg_bin, tmp_path)
+        dst = tmp_path / "window.wav"
+        build_window_audio(ffmpeg_bin, store, segments, 1000, 6300, dst)
+
+        with wave.open(str(dst), "rb") as w:
+            assert w.getframerate() == PROJECT_SAMPLE_RATE
+            assert w.getnchannels() == PROJECT_CHANNELS
+
+
+def test_dev_engines_produce_the_keys_audio_py_defines(ffmpeg_bin, engine, loop, monkeypatch, tmp_path):
+    """Plan 01-03 Task 2: the dev engines' actual output keys equal
+    audio.py's contract helpers for the same inputs — proving there is
+    exactly one definition of the key shape, not two that happen to agree
+    today. (ChatterboxEngine/MuseTalkEngine key resolution is out of scope
+    until the real models are implemented; see 01-03-SUMMARY.md.)"""
+    monkeypatch.setattr(core_db, "get_engine", lambda: engine)
+    with mock_aws():
+        store = ObjectStore(Settings(s3_endpoint="", s3_bucket="cross-engine-keys"))
+        store.ensure_bucket()
+
+        tts_engine = DevTTSEngine(store)
+        tts_engine.load()
+        uri, _ = tts_engine.synthesize_segment("job-x", 2, "Testing key parity.", seed=1)
+        _, key = store.parse_uri(uri)
+        assert key == tts_segment_key("job-x", 2)
+
+        loop_clip = tmp_path / "loop.mp4"
+        subprocess.run(
+            [
+                ffmpeg_bin, "-y", "-hide_banner", "-f", "lavfi",
+                "-i", "color=c=teal:s=64x64:d=1:r=10", "-pix_fmt", "yuv420p", str(loop_clip),
+            ],
+            check=True, capture_output=True,
+        )
+        with Session(engine) as session:
+            db_loop = session.get(type(loop), loop.id)
+            db_loop.source_uri = store.put_file("loops/x/source.mp4", loop_clip)
+            session.add(db_loop)
+            session.commit()
+
+        lipsync_engine = DevLipsyncEngine(store)
+        lipsync_engine.load()
+        chunk_uri = lipsync_engine.sync_chunk("job-x", str(loop.id), 0, 1000)
+        _, chunk_key = store.parse_uri(chunk_uri)
+        assert chunk_key == lipsync_chunk_key("job-x", 0, 1000)
