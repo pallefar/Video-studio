@@ -1,0 +1,13 @@
+{
+  "source_path": "/Users/karstenhaldan/Video-studio/docs/pipeline-spec.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Pipeline Spec — hardware, models, ffmpeg chains, failure modes",
+  "summary": "Technical reference for the video pipeline: GPU/VRAM constraints, model choices, RenderJob JSON schema and state machine, ffmpeg assembly chain, failure modes, service topology.",
+  "scope": ["RTX 3090 hardware constraints", "Chatterbox TTS", "MuseTalk lip-sync", "Wan 2.2 B-roll", "faster-whisper captions", "RenderJob schema", "job state machine", "ffmpeg assembly chain", "loudness normalization", "watermark burn-in", "failure modes", "performance budget", "service topology (Postgres, Redis, MinIO)"],
+  "cross_refs": ["docs/psd.md", "packages/schema/models.py", "scripts/bench.py", "scripts/verify_gpu.py", "tests/test_gpu_exclusivity.py", "tests/test_portability.py", ".env.example", "CLAUDE.local.md"],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

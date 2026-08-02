@@ -1,0 +1,13 @@
+{
+  "source_path": "/Users/karstenhaldan/Video-studio/docs/workstation.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Workstation setup — the RTX 3090 host",
+  "summary": "Setup guide and acceptance runbook for the RTX 3090 GPU host: ComfyUI sidecar, model weights, workflow templates, bring-up order.",
+  "scope": ["RTX 3090 GPU host", "ComfyUI headless sidecar", "worker_gpu render and wan lanes", "model weights (Wan 2.x, SDXL, ACE-Step, Qwen)", "workflow templates", "identity LoRAs", "milestone acceptance runbook"],
+  "cross_refs": ["docs/pipeline-spec.md", "docs/mac-dev.md", "docs/roadmap-v2.md", "docs/milestones.md"],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

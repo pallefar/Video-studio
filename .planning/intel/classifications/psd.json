@@ -1,0 +1,29 @@
+{
+  "source_path": "/Users/karstenhaldan/Video-studio/docs/psd.md",
+  "type": "PRD",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "PSD — Avatar Render Pipeline",
+  "summary": "Product/system design for a self-hosted AI avatar video pipeline: goals, stack decisions, data model, milestones with acceptance criteria, and compliance requirements.",
+  "scope": [
+    "avatar render pipeline",
+    "FastAPI API",
+    "Redis/RQ queue",
+    "GPU worker (Chatterbox TTS, MuseTalk lip-sync)",
+    "CPU worker (ffmpeg assembly)",
+    "B-roll asset library (Pexels, Pixabay, Wan 2.2)",
+    "compliance gate (EU AI Act Article 50(4), YouTube altered_content)",
+    "YouTube publish",
+    "control panel (Vite/React)",
+    "milestones M0-M9"
+  ],
+  "cross_refs": [
+    "docs/pipeline-spec.md",
+    "docs/milestones.md",
+    "CLAUDE.md",
+    "CLAUDE.local.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "Hybrid document: contains problem statement, success criterion, non-goals, and requirements table C1-C5 (PRD signals) alongside stack decision tables with rationale and rejected alternatives (ADR-like, sections 2 and 4.1) and milestone acceptance criteria. Dominant framing is product/requirements; technical detail is delegated to companion docs/pipeline-spec.md. Decision sections (no-Next.js, non-containerised GPU worker, Wan 2.2 over HunyuanVideo/LTX/Mochi, Pexels/Pixabay over Unsplash) are strong candidates for extraction as locked decisions despite the PRD classification. No frontmatter. Output filename omits source-path hash suffix: no shell available to compute SHA-256; slug 'psd' is unique in this ingest set."
+}

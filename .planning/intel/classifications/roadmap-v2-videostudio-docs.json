@@ -1,0 +1,30 @@
+{
+  "source_path": "/Users/karstenhaldan/Video-studio/docs/roadmap-v2.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Roadmap v2 — Higgsfield-class creative studio + video editor",
+  "summary": "V2 roadmap specifying a self-hosted Higgsfield-style model aggregator plus multi-track video studio, with provider layer, GPU lanes, licences, and milestones M10-M18.",
+  "scope": [
+    "model provider layer (local/remote-gpu/api)",
+    "camera and VFX preset registry",
+    "Wan 2.2 model family",
+    "video studio timeline editor",
+    "ffmpeg render compiler",
+    "storyboard-first creation",
+    "GPU lane scheduling (RTX 3090)",
+    "identity LoRA training (Soul ID equivalent)",
+    "licence register",
+    "compliance guardrails C1-C5 and identity consent"
+  ],
+  "cross_refs": [
+    "docs/psd.md",
+    "docs/milestones.md",
+    "pipeline_core/locks.py",
+    "tests/test_gpu_exclusivity.py",
+    "pipeline_core/comfy_nodes.py"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "Hybrid document: PRD signals (scope statement, feature map, out-of-scope list, owner requirements) compete with SPEC signals (GenerationProvider interface, lane/queue mechanics, timeline JSON schema, render compiler design, licence contracts). SPEC signals are dominant and higher precedence per ambiguity rule. Contains dated owner decisions ('Status: planned, owner decision 2026-07-29') but lacks ADR structure. Filename suffix in output uses path-derived slug 'videostudio-docs' instead of SHA-256 hash (no shell available to compute hash)."
+}
