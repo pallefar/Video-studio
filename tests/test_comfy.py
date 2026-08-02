@@ -309,7 +309,7 @@ def test_declared_blind_spots_are_visible_and_bounded():
     assert actual_unverified == expected_unverified
 
 
-def test_audit_graph_output_index_check_reads_the_signature_not_a_hardcoded_class():
+def test_audit_graph_mutation_guard_output_index_reads_the_signature():
     """Mutation guard: audit_graph's output-index check must read the
     recorded signature, not hardcode a class name. A one-output class
     wired from index 1 is a defect; the same graph against a doctored
@@ -329,7 +329,7 @@ def test_audit_graph_output_index_check_reads_the_signature_not_a_hardcoded_clas
     assert not any("output index" in d for d in defects), defects
 
 
-def test_audit_graph_required_input_check_reads_the_signature():
+def test_audit_graph_mutation_guard_required_input_reads_the_signature():
     """Mutation guard: a hand-built VHS_VideoCombine node missing
     loop_count produces a defect naming it; the same graph audits clean
     once the key is added."""
@@ -360,7 +360,7 @@ def test_audit_graph_flags_dangling_edge_reference():
     assert any("99" in d for d in defects), defects
 
 
-def test_audit_graph_reachability_and_inert_param_naming():
+def test_audit_graph_mutation_guard_reachability_and_inert_param_naming():
     """Mutation guard: a node nothing reads from is a defect; wiring its
     output into the chain makes the same graph audit clean. When the
     orphan is the target of the template's own `inputs` map, the defect

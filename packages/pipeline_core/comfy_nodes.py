@@ -266,6 +266,266 @@ NODE_SIGNATURES: dict[str, NodeSignature] = {
             "VideoCombine)."
         ),
     ),
+    "VHS_LoadVideo": NodeSignature(
+        outputs=("IMAGE", "INT", "AUDIO", "VHS_VIDEOINFO"),
+        required_inputs=(
+            "video", "force_rate", "custom_width", "custom_height",
+            "frame_load_cap", "skip_first_frames", "select_every_nth",
+        ),
+        provenance=(
+            "Kosinkadink/ComfyUI-VideoHelperSuite "
+            "videohelpersuite/load_video_nodes.py::LoadVideoUpload (fetched "
+            "2026-08-02, main branch; NODE_CLASS_MAPPINGS['VHS_LoadVideo'] "
+            "= LoadVideoUpload). Five more required keys than the two "
+            "shipped templates using this node supply — a second, "
+            "independent defect on wan2.1-vace-1.3b/wan2.2-vace-fun "
+            "(already on AWAITING_REPAIR for the orphan-node defect) and "
+            "on recammaster (already on it for VHS_VideoCombine's missing "
+            "fields)."
+        ),
+    ),
+    # --- ComfyUI core: image/audio load-save, checkpoints, LoRA --------
+    "CheckpointLoaderSimple": NodeSignature(
+        outputs=("MODEL", "CLIP", "VAE"),
+        required_inputs=("ckpt_name",),
+        provenance=(
+            "comfyanonymous/ComfyUI nodes.py::CheckpointLoaderSimple "
+            "(fetched 2026-08-02, master branch) — genuinely 3 outputs, "
+            "the pattern UnetLoaderGGUF is NOT (research Anti-Patterns: "
+            "'never assume by analogy')."
+        ),
+    ),
+    "LoraLoader": NodeSignature(
+        outputs=("MODEL", "CLIP"),
+        required_inputs=("model", "clip", "lora_name", "strength_model", "strength_clip"),
+        provenance=(
+            "comfyanonymous/ComfyUI nodes.py::LoraLoader (fetched "
+            "2026-08-02, master branch). Never the source of an edge in "
+            "sdxl.json — that IS the defect (see AWAITING_REPAIR)."
+        ),
+    ),
+    "EmptyLatentImage": NodeSignature(
+        outputs=("LATENT",),
+        required_inputs=("width", "height", "batch_size"),
+        provenance=(
+            "comfyanonymous/ComfyUI nodes.py::EmptyLatentImage (fetched "
+            "2026-08-02, master branch)."
+        ),
+    ),
+    "SaveImage": NodeSignature(
+        outputs=("IMAGE",),
+        required_inputs=("images", "filename_prefix"),
+        provenance=(
+            "comfyanonymous/ComfyUI nodes.py::SaveImage (fetched "
+            "2026-08-02, master branch)."
+        ),
+    ),
+    "LoadImage": NodeSignature(
+        outputs=("IMAGE", "MASK"),
+        required_inputs=("image",),
+        provenance=(
+            "comfyanonymous/ComfyUI nodes.py::LoadImage (fetched "
+            "2026-08-02, master branch)."
+        ),
+    ),
+    "LoadAudio": NodeSignature(
+        outputs=("AUDIO",),
+        required_inputs=("audio",),
+        provenance=(
+            "comfyanonymous/ComfyUI comfy_extras/nodes_audio.py::LoadAudio "
+            "(fetched 2026-08-02, master branch) — newer schema-based "
+            "IO.ComfyNode API; legacy required-bucket membership confirmed "
+            "via comfy_api/latest/_io.py::add_to_dict_v1 "
+            "('optional' if i.optional else 'required' — a default value "
+            "never makes a field optional on its own)."
+        ),
+    ),
+    "SaveAudio": NodeSignature(
+        outputs=("AUDIO",),
+        required_inputs=("audio", "filename_prefix"),
+        provenance=(
+            "comfyanonymous/ComfyUI comfy_extras/nodes_audio.py::SaveAudio "
+            "(fetched 2026-08-02, master branch)."
+        ),
+    ),
+    "VAEDecodeAudio": NodeSignature(
+        outputs=("AUDIO",),
+        required_inputs=("samples", "vae"),
+        provenance=(
+            "comfyanonymous/ComfyUI comfy_extras/nodes_audio.py::"
+            "VAEDecodeAudio (fetched 2026-08-02, master branch)."
+        ),
+    ),
+    # --- ComfyUI core: ACE-Step (audio, M18) ----------------------------
+    "TextEncodeAceStepAudio": NodeSignature(
+        outputs=("CONDITIONING",),
+        required_inputs=("clip", "tags", "lyrics", "lyrics_strength"),
+        provenance=(
+            "comfyanonymous/ComfyUI comfy_extras/nodes_ace.py::"
+            "TextEncodeAceStepAudio (fetched 2026-08-02, master branch) — "
+            "schema-based IO.ComfyNode; `lyrics_strength` has a default "
+            "(1.0) but is NOT marked optional=True, so it lands in the "
+            "legacy required bucket regardless (same "
+            "comfy_api/latest/_io.py rule as LoadAudio above). "
+            "ace-step.json's node 6 does not supply it — a real, "
+            "independently-discovered defect (see AWAITING_REPAIR)."
+        ),
+    ),
+    "EmptyAceStepLatentAudio": NodeSignature(
+        outputs=("LATENT",),
+        required_inputs=("seconds", "batch_size"),
+        provenance=(
+            "comfyanonymous/ComfyUI comfy_extras/nodes_ace.py::"
+            "EmptyAceStepLatentAudio (fetched 2026-08-02, master branch)."
+        ),
+    ),
+    # --- ComfyUI core: camera embedding ---------------------------------
+    "WanCameraEmbedding": NodeSignature(
+        outputs=("WAN_CAMERA_EMBEDDING", "INT", "INT", "INT"),
+        required_inputs=("camera_pose", "width", "height", "length"),
+        provenance=(
+            "comfyanonymous/ComfyUI comfy_extras/nodes_camera_trajectory.py"
+            "::WanCameraEmbedding (fetched 2026-08-02, master branch) — "
+            "ships with ComfyUI core, no custom pack required "
+            "(CORE_NODE_NOTES above). Not an edge source in "
+            "wan2.2-fun-camera.json — that IS the orphan-node defect (see "
+            "AWAITING_REPAIR)."
+        ),
+    ),
+    # --- ComfyUI_Fill-ChatterBox (filliptm) -----------------------------
+    "FL_ChatterboxTTS": NodeSignature(
+        outputs=("AUDIO", "STRING"),
+        required_inputs=("text", "exaggeration", "cfg_weight", "temperature", "seed"),
+        provenance=(
+            "filliptm/ComfyUI_Fill-ChatterBox chatterbox_node.py::"
+            "FL_ChatterboxTTSNode (fetched 2026-08-02, main branch; "
+            "NODE_CLASS_MAPPINGS['FL_ChatterboxTTS'] = "
+            "FL_ChatterboxTTSNode). chatterbox.json wires this correctly — "
+            "confirmed, not assumed, unlike the manifest's own "
+            "'node names verified' caveat for this pack (comfy_nodes.py "
+            "NodePack.notes)."
+        ),
+    ),
+    # --- ComfyUI-MuseTalk (chaojie) --------------------------------------
+    "MuseTalkRun": NodeSignature(
+        outputs=("IMAGE",),
+        required_inputs=("video_path", "audio_path", "bbox_shift", "batch_size"),
+        provenance=(
+            "chaojie/ComfyUI-MuseTalk nodes.py::MuseTalkRun (fetched "
+            "2026-08-02, main branch). SURPRISING: the real upstream "
+            "signature takes filesystem PATH STRINGS (video_path, "
+            "audio_path), not IMAGE/AUDIO graph connections — "
+            "musetalk-image.json wires `image`/`audio`/`seed`/`fps` "
+            "instead, none of which match this contract except "
+            "`bbox_shift`. A wiring mismatch this audit's required-input "
+            "check now catches (see AWAITING_REPAIR), found only by "
+            "reading the source — the node-pack manifest's class-name "
+            "probe cannot see it."
+        ),
+    ),
+    # --- ComfyUI-WanVideoWrapper (kijai) — DECLARED BLIND SPOT ----------
+    # The manifest's own notes (NODE_PACKS above) already record that only
+    # these classes' NAMES were schema-verified against a running
+    # ComfyUI's /object_info on the workstation (M11) — never their I/O
+    # wiring. Research Pitfall 4 names this explicitly: class-type
+    # existence and input-wiring correctness are two different failure
+    # modes, and only the first was checked for uni3c.json/recammaster.json.
+    # Recording these as unverified (outputs=None, required_inputs=None)
+    # means audit_graph's output-index and required-input checks correctly
+    # skip them instead of guessing — and its coverage check does NOT flag
+    # them as missing, because a declared blind spot is not the same
+    # defect as an undeclared one. Phase 4 owns re-verifying this wiring
+    # against real hardware (roadmap Phase 4).
+    "WanVideoModelLoader": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
+    "WanVideoVAELoader": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
+    "WanVideoTextEncode": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
+    "WanVideoDecode": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
+    "WanVideoImageToVideoEncode": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
+    "WanVideoUni3C_ControlnetLoader": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
+    "WanVideoUni3C_embeds": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
+    "WanVideoSampler": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
+    "WanVideoReCamMasterCameraEmbed": NodeSignature(
+        outputs=None, required_inputs=None,
+        provenance=(
+            "kijai/ComfyUI-WanVideoWrapper — class name only, "
+            "schema-verified against the installed pack's /object_info on "
+            "the workstation (M11); full I/O signature not verified from "
+            "source. Phase 4 owns verifying uni3c/recammaster wiring on "
+            "hardware."
+        ),
+    ),
 }
 
 
