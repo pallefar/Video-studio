@@ -15,10 +15,30 @@ one per local model, in a sidecar path-map format:
      "required": ["prompt", ...],
      "graph": { ...ComfyUI API-format export... }}
 
+An `inputs` entry maps a parameter to a path, or — where one studio value
+must drive more than one graph node — to a LIST of paths. The two shapes
+are distinguished structurally, not by a flag: a single path is a list
+whose elements are strings (`["40", "inputs", "length"]`); a multi-path
+entry is a list whose elements are themselves lists
+(`[["40", "inputs", "length"], ["45", "inputs", "length"]]`).
+`input_mapping_paths` normalises either shape to a list of concrete paths;
+`inject` and `tests/test_comfy.py`'s structural audit both consume it, so
+there is one source of truth for what a mapping entry means. The
+multi-path shape exists for exactly one reason so far: a camera-embedding
+node that carries its own width/height/length must agree with the empty
+latent it samples alongside, or the sampler receives two disagreeing
+shapes and produces a subtly wrong clip rather than an error
+(wan2.2-fun-camera, wired in plan 03-02).
+
 `inject` deep-copies the graph and patches supplied values at their paths;
-params without a mapping are ignored (t2v has no source_image). Exporting a
-new template: ComfyUI "Save (API Format)" -> wrap with output/inputs ->
-`pytest tests/test_comfy.py` validates every path structurally.
+params without a mapping are ignored (t2v has no source_image). An
+unresolvable path raises `ComfyUIError` naming the parameter and the
+failing path — never a silent partial patch, because a multi-path entry
+half-applied is worse than one rejected outright: the caller would submit
+a graph whose nodes disagree about the value it never fully wrote.
+Exporting a new template: ComfyUI "Save (API Format)" -> wrap with
+output/inputs -> `pytest tests/test_comfy.py` validates every path
+structurally.
 """
 
 from __future__ import annotations
@@ -74,24 +94,50 @@ def load_template(model: str) -> dict:
     return json.loads(package.read_text())
 
 
+def input_mapping_paths(mapping: list) -> list[list]:
+    """Normalise one `inputs` mapping entry to a list of concrete paths.
+
+    A single path is a list whose elements are strings; a multi-path entry
+    is a list whose elements are themselves lists — distinguished
+    structurally, not by a flag. `inject` and the structural audit test
+    both call this, so there is one source of truth for what a mapping
+    entry means."""
+    if mapping and isinstance(mapping[0], list):
+        return mapping
+    return [mapping]
+
+
 def inject(template: dict, values: dict) -> dict:
     """Patch supplied values into a deep copy of the template's graph.
 
     Unmapped values are ignored; required inputs missing from `values`
-    (after defaults) raise."""
+    (after defaults) raise. A parameter may map to a single path or to a
+    list of paths (`input_mapping_paths`) — every path for a param is
+    patched with the same value. An unresolvable path raises
+    `ComfyUIError` naming the parameter and the failing path rather than
+    silently leaving the graph half-patched; because the deep copy this
+    builds is never returned on that path, no caller ever observes a
+    partially-applied multi-path mapping."""
     merged = {**template.get("defaults", {}), **{k: v for k, v in values.items() if v is not None}}
     for required in template.get("required", []):
         if merged.get(required) in (None, "", []):
             raise ComfyUIError(f"workflow requires input {required!r}")
 
     graph = copy.deepcopy(template["graph"])
-    for param, path in template.get("inputs", {}).items():
+    for param, mapping in template.get("inputs", {}).items():
         if param not in merged:
             continue
-        node = graph
-        for step in path[:-1]:
-            node = node[step]
-        node[path[-1]] = merged[param]
+        for path in input_mapping_paths(mapping):
+            node = graph
+            try:
+                for step in path[:-1]:
+                    node = node[step]
+                node[path[-1]] = merged[param]
+            except (KeyError, TypeError, IndexError) as exc:
+                raise ComfyUIError(
+                    f"workflow template's mapping for {param!r} has an "
+                    f"unresolvable path {path!r}: {exc}"
+                ) from exc
     return graph
 
 
