@@ -126,17 +126,50 @@ def test_output_key_variants():
 
 
 def test_every_model_has_a_structurally_valid_template():
+    from pipeline_core.comfy import input_mapping_paths
+
     for model in COMFY_MODELS:
         template = load_template(model)
         graph = template["graph"]
         assert template["output"]["node"] in graph, model
         assert template["output"]["kind"] in ("video", "image", "audio"), model
-        for param, path in template["inputs"].items():
-            node = graph
-            for step in path[:-1]:
-                assert step in node, f"{model}: {param} path breaks at {step}"
-                node = node[step]
-            assert path[-1] in node, f"{model}: {param} final field missing"
+        for param, mapping in template["inputs"].items():
+            for path in input_mapping_paths(mapping):
+                node = graph
+                for step in path[:-1]:
+                    assert step in node, f"{model}: {param} path breaks at {step}"
+                    node = node[step]
+                assert path[-1] in node, f"{model}: {param} final field missing"
+
+
+def test_structural_audit_validates_both_single_and_multi_path_mappings():
+    """A template using either mapping shape is validated by the same
+    audit — proven against small fixture templates of each shape, not
+    just by the shipped templates (which today are all single-path)."""
+    from pipeline_core.comfy import input_mapping_paths
+
+    single_path_template = {
+        "output": {"node": "1", "kind": "video"},
+        "inputs": {"width": ["1", "inputs", "width"]},
+        "graph": {"1": {"class_type": "Stub", "inputs": {"width": 0}}},
+    }
+    multi_path_template = {
+        "output": {"node": "1", "kind": "video"},
+        "inputs": {"length": [["1", "inputs", "length"], ["2", "inputs", "num_frames"]]},
+        "graph": {
+            "1": {"class_type": "Stub", "inputs": {"length": 0}},
+            "2": {"class_type": "Other", "inputs": {"num_frames": 0}},
+        },
+    }
+    for template in (single_path_template, multi_path_template):
+        graph = template["graph"]
+        for param, mapping in template["inputs"].items():
+            for path in input_mapping_paths(mapping):
+                node = graph
+                for step in path[:-1]:
+                    assert step in node, f"{param} path breaks at {step}"
+                    node = node[step]
+                assert path[-1] in node, f"{param} final field missing"
 
 
 def test_missing_template_raises_clear_error():
@@ -157,6 +190,85 @@ def test_inject_requires_required_inputs():
     template = load_template("wan2.2-i2v")
     with pytest.raises(ComfyUIError, match="source_image"):
         inject(template, {"prompt": "hello"})
+
+
+# --- multi-path input mapping (inject()) --------------------------------
+
+
+def test_inject_backward_compatible_with_single_path_mappings():
+    """Every existing single-path template must inject exactly as before —
+    the single-path walk-and-assign is the same code multi-path now
+    shares, not a parallel implementation."""
+    for model in ("wan2.2-t2v", "wan2.1-t2v-1.3b"):
+        template = load_template(model)
+        graph = inject(template, {"prompt": "hello", "seed": 7})
+
+        prompt_path = template["inputs"]["prompt"]
+        node = graph
+        for step in prompt_path[:-1]:
+            node = node[step]
+        assert node[prompt_path[-1]] == "hello", model
+
+        seed_path = template["inputs"]["seed"]
+        node = graph
+        for step in seed_path[:-1]:
+            node = node[step]
+        assert node[seed_path[-1]] == 7, model
+
+
+def _multi_path_fixture(required=None):
+    return {
+        "output": {"node": "3", "kind": "video"},
+        "defaults": {},
+        "inputs": {"length": [["40", "inputs", "length"], ["45", "inputs", "length"]]},
+        "required": required or [],
+        "graph": {
+            "40": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"length": 33}},
+            "45": {"class_type": "WanCameraEmbedding", "inputs": {"length": 33}},
+            "3": {"class_type": "KSampler", "inputs": {}},
+        },
+    }
+
+
+def test_inject_multi_path_patches_both_locations_in_one_call():
+    """A template mapping one parameter to a list of two paths — the
+    camera-embedding-versus-latent frame-count case — patches BOTH
+    locations with the same value, in one inject() call."""
+    template = _multi_path_fixture()
+    graph = inject(template, {"length": 81})
+    assert graph["40"]["inputs"]["length"] == 81
+    assert graph["45"]["inputs"]["length"] == 81
+
+
+def test_inject_multi_path_unresolvable_path_raises_without_partial_patch():
+    """A multi-path entry where one of the paths does not resolve raises a
+    clear error naming the param and the failing path, rather than
+    silently patching one of the two — a half-patched graph desynchronises
+    a latent and a camera embedding, which is worse than a rejected one."""
+    template = {
+        "output": {"node": "3", "kind": "video"},
+        "defaults": {},
+        "inputs": {"length": [["40", "inputs", "length"], ["99", "inputs", "length"]]},
+        "required": [],
+        "graph": {
+            "40": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"length": 33}},
+            "3": {"class_type": "KSampler", "inputs": {}},
+        },
+    }
+    with pytest.raises(ComfyUIError, match="length") as exc_info:
+        inject(template, {"length": 81})
+    assert "99" in str(exc_info.value)
+    # the template's own graph was never mutated (inject deep-copies)
+    assert template["graph"]["40"]["inputs"]["length"] == 33
+
+
+def test_inject_required_check_unaffected_by_multi_path_shape():
+    """A required param with a multi-path mapping and no supplied value
+    still raises — the shape of a param's mapping does not change
+    `required` handling."""
+    template = _multi_path_fixture(required=["length"])
+    with pytest.raises(ComfyUIError, match="length"):
+        inject(template, {})
 
 
 def test_wan_frames_4n_plus_1():
