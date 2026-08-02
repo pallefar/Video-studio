@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import inspect
 import subprocess
+import sys
 import wave
 from array import array
 
@@ -30,6 +31,7 @@ from sqlmodel import Session
 from structlog.testing import capture_logs
 
 import pipeline_core.db as core_db
+import scripts.bench as bench
 import worker_gpu.run as run_module
 import worker_gpu.stages as gpu_stages
 from pipeline_core.settings import Settings
@@ -478,3 +480,74 @@ def test_dev_engines_produce_the_keys_audio_py_defines(ffmpeg_bin, engine, loop,
         chunk_uri = lipsync_engine.sync_chunk("job-x", str(loop.id), 0, 1000)
         _, chunk_key = store.parse_uri(chunk_uri)
         assert chunk_key == lipsync_chunk_key("job-x", 0, 1000)
+
+
+# ---------------------------------------------------------------------------
+# 01-04 Task 1: scripts/bench.py --smoke CLI, CPU-only.
+#
+# These prove the argument-parsing guards and the CUDA refusal path only —
+# never the render path itself, which needs real CUDA (01-04 Task 2, gated
+# on the workstation). No test here fakes CUDA availability to reach
+# smoke()'s render body.
+# ---------------------------------------------------------------------------
+
+
+def test_bench_cli_requires_exactly_one_of_smoke_or_loop(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["bench.py"])
+    with pytest.raises(SystemExit) as exc:
+        bench.main()
+    assert exc.value.code != 0
+
+
+def test_bench_cli_rejects_both_smoke_and_loop(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["bench.py", "--smoke", "--loop", "some-loop-id"])
+    with pytest.raises(SystemExit) as exc:
+        bench.main()
+    assert exc.value.code != 0
+
+
+def test_bench_cli_voice_and_base_loop_parse_alongside_smoke(monkeypatch):
+    """--voice / --base-loop parse cleanly with --smoke and are threaded
+    through to smoke() positionally — no collision with the pre-existing
+    --loop mode's parser entry."""
+    calls = []
+    monkeypatch.setattr(bench, "smoke", lambda voice, base_loop: calls.append((voice, base_loop)) or 0)
+    monkeypatch.setattr(
+        sys, "argv", ["bench.py", "--smoke", "--voice", "voice-1", "--base-loop", "loop-1"]
+    )
+
+    code = bench.main()
+
+    assert code == 0
+    assert calls == [("voice-1", "loop-1")]
+
+
+def test_bench_cli_base_loop_flag_does_not_collide_with_loop_flag(monkeypatch):
+    """Regression guard for the naming decision: --base-loop is a distinct
+    flag from --loop (the M2 cache-benchmark mode) and --loop's value still
+    reaches bench_loop() untouched when --base-loop is also present."""
+    calls = []
+    monkeypatch.setattr(bench, "bench_loop", lambda loop_id: calls.append(loop_id) or 0)
+    monkeypatch.setattr(
+        sys, "argv", ["bench.py", "--loop", "loop-id-x", "--base-loop", "should-be-ignored"]
+    )
+
+    code = bench.main()
+
+    assert code == 0
+    assert calls == ["loop-id-x"]
+
+
+def test_smoke_exits_1_with_cuda_message_and_no_traceback_when_gpu_absent(capsys):
+    """`smoke()` fails via `_require_gpu`'s SystemExit(1) before touching the
+    database or loading any model — proven by the CUDA-guard message
+    reaching stderr with no real GPU present. Must pass with no torch
+    installed at all, or CPU-only torch — never by faking a CUDA device,
+    which would let a deleted guard pass silently."""
+    with pytest.raises(SystemExit) as exc:
+        bench.smoke(None, None)
+
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "CUDA" in err
+    assert "Traceback" not in err
