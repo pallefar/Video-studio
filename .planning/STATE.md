@@ -79,7 +79,23 @@ Last session: 2026-08-02 — Phase 1 Wave 1 executed to the hardware boundary. P
 
 Also done since: plan 01-03 **partial** — `worker_gpu/engines/audio.py` (the CUDA-free contract layer: 48 kHz/stereo constants, ffmpeg helpers, `tts_segment_key`/`lipsync_chunk_key`, `write_project_wav`, `build_window_audio`) plus 01-03 Task 2 in full (dev engines repointed at it, output byte-identical). 9 new CPU tests with real ffmpeg. The two engine bodies remain `NotImplementedError` by design — see 01-03-SUMMARY.md.
 
-**Mac-side work is now exhausted across BOTH phases.** Everything remaining needs the card.
+**Phase 3 (Wan Lane Bring-Up) planned, and its first wave executed (2026-08-02).** Planned ahead of hardware; the plan-checker passed it. Research + the new audit found that **10 of 15 ComfyUI workflow templates cannot execute correctly**, in four independent defect classes — all verified against the node packs' own source, none of which CI ever caught:
+1. **Non-existent output indices** — `UnetLoaderGGUF.RETURN_TYPES = ("MODEL",)` (one output), yet six templates wire `clip ← [node,1]` / `vae ← [node,2]`.
+2. **Missing required inputs** — eight templates omit `VHS_VideoCombine`'s `loop_count`/`pingpong`/`save_output`; `VHS_LoadVideo` has 7 required keys and templates supply 2; `ace-step` omits `lyrics_strength`.
+3. **Orphan nodes = silently inert parameters** (the worst class — nothing errors, output looks plausible): five templates patch an uploaded asset into a node the output can't reach. `wan2.2-fun-camera`'s `camera_motion` feeds an orphaned `WanCameraEmbedding`, so **every camera-preset generation applied no camera motion**; likewise `wan2.2-i2v` ignoring `source_image`, both VACE templates ignoring `source_video`, and `sdxl` ignoring `lora_name` (the identity path Phase 5 depends on).
+4. **Wrong parameter names / wrong contracts** — every broken template passes `ckpt_name` to `UnetLoaderGGUF`, whose required key is `unet_name`; `MuseTalkRun`'s real signature takes `video_path`/`audio_path` strings but `musetalk-image.json` wires `image`/`audio` connections.
+
+Structural, too: Wan 2.2 A14B is a two-expert MoE needing two loaders + two sampler passes (every A14B template loads one file into one sampler), and no 5B path existed at all despite roadmap-v2 naming it the M10.6 benchmark's other arm.
+
+Why CI missed all of it: `test_every_model_has_a_structurally_valid_template` only checked that mapped INPUT paths resolve — never output-index existence, required inputs, or reachability.
+
+**Landed (plan 03-01, commits `a2af8ff` → `cade9f9`):** `NodeSignature`/`NODE_SIGNATURES` (34 entries, each citing the source it was read from) + `audit_graph()` in `comfy_nodes.py` with five checks (dangling edge, output-index bounds, required-input presence, signature coverage, backward reachability with inert-parameter naming); a bidirectional shrink-only `AWAITING_REPAIR` ratchet (broken templates must audit DIRTY, clean ones CLEAN — verified load-bearing by removing an entry and observing failure); the new `wan2.2-ti2v-5b` path (template + ModelSpec + manifest, three-loader GGUF split using `Wan22ImageToVideoLatent`, confirmed against ComfyUI's own shipped 5B workflow). `tests/test_comfy.py` 26 → 39 tests. No template was repaired here by design — repairs are 03-02/03-04, and repairing now would destroy the "fails today" assertion.
+
+**Phase 3 remaining:** plans 03-02 … 03-05 are all still **CPU-doable** (A14B MoE rebuild, Lightning 4-step arm + `bench.py --wan`, remaining repairs + closing the ratchet, pinning packs + a template-derived fetcher). Plans 03-06 … 03-08 need a card — and unlike Phases 1–2 that card can be **rented** (`scripts/rent_gpu.sh` → `scripts/vast_comfyui.sh` → SSH tunnel, `COMFY_URL=http://127.0.0.1:8188`), no physical 3090 required.
+
+Two decisions are owner calls, both surfacing during 03-02/03-04: Fun-Camera's over-declared `image_to_video` kind, and whether SDXL's inert identity-LoRA node is honestly removed or actually built (Phase 5 depends on it).
+
+**Mac-side work on Phases 1 and 2 is exhausted.** Everything remaining there needs the card.
 
 Also landed on the Mac since (plans 01-04 and 01-05, Task 1 of each — both deliberate partials, summaries say so):
 - `scripts/bench.py --smoke` rewritten to drive the engines' real public methods and to judge the 20 GB budget against the **device-level `nvidia-smi` figure**, not `torch.cuda.max_memory_allocated()` which excludes the CUDA context and MuseTalk's mmlab ops. Matters because Phase 3 must later fit a 16–22 GB Wan model on the same card. Fixed a real bug found doing it: `_require_gpu()`'s ImportError branch said "requires the GPU host" with no "CUDA" in it — the exact path a torch-less host hits. Verified here: `--smoke` exits 1 with a helpful message, no traceback; no-flag exits 2.
