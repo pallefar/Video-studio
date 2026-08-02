@@ -111,7 +111,24 @@ Plans:
   2. Bring-up order holds smallest-first: a z-image-turbo still, then a Wan 2.2 quantised (GGUF) 5 s t2v clip generated via the panel, landing as `origin='generated'`, `approved=false`
   3. Lane exclusivity holds on hardware: a wan-lane generation never holds the GPU concurrently with a render, and a queued generation never blocks a render
   4. Fun-Camera A14B GGUF + 4-step LoRA benchmarked (latency + VRAM via nvidia-smi recorded); the 14B-vs-5B default is decided and written down
-**Plans**: TBD
+**Plans**: 8 plans (8 waves — strictly sequential; waves 1–5 are fully CPU-doable now on a Mac, waves 6–8 need a CUDA sm_86 card: the 3090 OR a rented box via `scripts/rent_gpu.sh` + an SSH tunnel)
+
+**Planning finding (2026-08-02):** 10 of the 13 shipped workflow templates are structurally broken —
+6 wire CLIP/VAE from output indices a one-output loader does not have, 8 omit `VHS_VideoCombine`
+inputs the pack declares required, and 5 contain a node unreachable from the graph's output so the
+studio parameter patched into it is silently discarded (Fun-Camera's `camera_motion`, i2v/VACE
+source assets, SDXL's identity LoRA). The existing structural audit passes all 13. Every repair is
+CPU-provable and is front-loaded ahead of any hardware session.
+
+Plans:
+- [ ] 03-01-PLAN.md — Tracer: signature-driven graph audit (output-index bounds, required inputs, reachability) proven end to end on a new `wan2.2-ti2v-5b` path; multi-path input mapping (CPU-doable now)
+- [ ] 03-02-PLAN.md — Wan 2.2 A14B rebuilt as the two-expert MoE it actually is: two loaders, two chained samplers, connected source/camera inputs (CPU-doable now)
+- [ ] 03-03-PLAN.md — The 4-step Lightning Fun-Camera arm + `scripts/bench.py --wan`: latency and peak VRAM sampled during the run, works over an SSH tunnel (CPU-doable now)
+- [ ] 03-04-PLAN.md — The remaining repairs (VACE 1.3B, qwen-image, sdxl, musetalk, uni3c, recammaster) and the audit closed as a permanent standing gate (CPU-doable now)
+- [ ] 03-05-PLAN.md — Bring-up tooling: node-pack commit pinning, one template-derived model fetcher with a filename drift guard, runbook steps 6–8 as commands (CPU-doable now)
+- [ ] 03-06-PLAN.md — ComfyUI live on hardware: licence gate, pinned install, installed-vs-recorded signature check, clean `/object_info` diff (criterion 1 — GPU-blocked)
+- [ ] 03-07-PLAN.md — Smallest-first first clips and lane exclusivity under real load (criteria 2 + 3, M9.1 — GPU-blocked)
+- [ ] 03-08-PLAN.md — Fun-Camera benchmark, the 14B-vs-5B decision, and applying it everywhere the default is named (criterion 4, M10.6 — GPU-blocked)
 
 ### Phase 4: Camera Presets on Hardware
 **Goal**: The signature camera-preset experience works on real hardware — presets render acceptably through Wan2.2-Fun-Control-Camera, with every Civitai LoRA individually licence-audited before inclusion
