@@ -94,6 +94,12 @@ class LocalWanProvider:
             # (native ComfyUI nodes, no WanVideoWrapper), same lane and gates.
             ModelSpec(self.name, "wan2.1-t2v-1.3b", frozenset({GenerationKind.text_to_video}),
                       CLASS_LOCAL, "fast/Mac-class t2v, M30 (Apache 2.0)", est_cost=0.0),
+            # M10.6: the dense 5B fallback arm the Fun-Camera A14B benchmark
+            # decides against (roadmap-v2 §9) — single loader, no MoE split,
+            # same three-loader/VHS_VideoCombine pattern as wan2.1-t2v-1.3b.
+            ModelSpec(self.name, "wan2.2-ti2v-5b", frozenset({GenerationKind.text_to_video}),
+                      CLASS_LOCAL, "dense 5B fallback arm for the M10.6 "
+                      "14B-vs-5B decision (Apache 2.0)", est_cost=0.0),
             # Advanced mode (M11): Uni3C custom trajectories re-film a still;
             # ReCamMaster re-shoots existing footage with a new camera move.
             ModelSpec(self.name, "uni3c", frozenset({GenerationKind.image_to_video}),

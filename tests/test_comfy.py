@@ -27,8 +27,9 @@ from schema.models import Generation, GenerationKind
 
 COMFY_MODELS = [
     "wan2.2-t2v", "wan2.2-i2v", "wan2.2-fun-camera", "wan2.2-vace-fun",
-    "wan2.1-vace-1.3b", "wan2.1-t2v-1.3b", "z-image-turbo", "qwen-image",
-    "sdxl", "ace-step", "musetalk-image", "chatterbox", "uni3c", "recammaster",
+    "wan2.1-vace-1.3b", "wan2.1-t2v-1.3b", "wan2.2-ti2v-5b", "z-image-turbo",
+    "qwen-image", "sdxl", "ace-step", "musetalk-image", "chatterbox", "uni3c",
+    "recammaster",
 ]
 
 
@@ -163,6 +164,23 @@ def test_wan_frames_4n_plus_1():
     assert wan_frames(0.1, 16) == 5
     for seconds in (1.0, 2.5, 5.0):
         assert (wan_frames(seconds, 16) - 1) % 4 == 0
+
+
+# --- signature-driven graph audit (comfy_nodes.py) ---------------------------
+
+
+def test_signature_driven_audit_passes_the_proven_templates():
+    """The two templates whose every node class carries a verified
+    NodeSignature — the M30-proven wan2.1-t2v-1.3b and the new
+    wan2.2-ti2v-5b fallback arm — must audit clean. A failure here means
+    either a real wiring regression or a wrong signature; the message lists
+    the defects so it reads as a diagnosis, not a bare assertion error."""
+    from pipeline_core.comfy_nodes import audit_graph
+
+    for model in ("wan2.1-t2v-1.3b", "wan2.2-ti2v-5b"):
+        template = load_template(model)
+        defects = audit_graph(template["graph"], output_node=template["output"]["node"])
+        assert defects == [], f"{model}: {defects}"
 
 
 # --- generation values -------------------------------------------------------
